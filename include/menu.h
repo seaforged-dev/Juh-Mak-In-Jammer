@@ -18,10 +18,8 @@ enum AppState {
     STATE_ELRS_ACTIVE,    // ELRS FHSS transmitting
     STATE_FALSEPOS_MENU,  // Mode 3 submenu
     STATE_FP_ACTIVE,      // False positive mode running
-    // Future states:
-    // STATE_RID_MENU,     // Mode 1
-    // STATE_COMBINED_MENU,// Mode 4
-    // STATE_SETTINGS,
+    STATE_RID_ACTIVE,     // Mode 1: RID spoofer running
+    STATE_COMBINED_ACTIVE,// Mode 4: Combined RID + ELRS
 };
 
 // Main menu item indices

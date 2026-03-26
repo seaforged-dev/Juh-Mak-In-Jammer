@@ -3,6 +3,8 @@
 #include "menu.h"
 #include "rf_modes.h"
 #include "false_positive.h"
+#include "rid_spoofer.h"
+#include "combined_mode.h"
 
 // ============================================================
 // Menu state machine + button debouncer
@@ -261,6 +263,52 @@ static void drawFpActive() {
     _oled->display();
 }
 
+static void drawRidActive() {
+    _oled->clearDisplay();
+    drawHeader("RID Spoofer - TX");
+
+    RidParams r = ridGetParams();
+
+    _oled->setCursor(0, 14);
+    _oled->printf("%.4f, %.4f", r.latitude, r.longitude);
+    _oled->setCursor(0, 24);
+    _oled->printf("Alt: %.0f m", r.altitude);
+    _oled->setCursor(0, 34);
+    _oled->printf("WiFi: %lu  BLE: %lu",
+                  (unsigned long)r.wifiPackets,
+                  (unsigned long)r.blePackets);
+    _oled->setCursor(0, 44);
+    _oled->print("TX: WiFi beacons + BLE");
+
+    _oled->setCursor(0, 56);
+    _oled->print("LONG=stop");
+    _oled->display();
+}
+
+static void drawCombinedActive() {
+    _oled->clearDisplay();
+    drawHeader("COMBINED - DUAL TX");
+
+    CombinedParams c = combinedGetParams();
+
+    _oled->setCursor(0, 14);
+    _oled->printf("RID: W:%lu B:%lu",
+                  (unsigned long)c.ridWifiPkts,
+                  (unsigned long)c.ridBlePkts);
+    _oled->setCursor(0, 24);
+    _oled->printf("ELRS: %lu pkts %lu hops",
+                  (unsigned long)c.elrsPkts,
+                  (unsigned long)c.elrsHops);
+    _oled->setCursor(0, 34);
+    _oled->print("Core0:WiFi+BLE Core1:SX1262");
+    _oled->setCursor(0, 44);
+    _oled->printf("Elapsed: %lu sec", (unsigned long)c.elapsedSec);
+
+    _oled->setCursor(0, 56);
+    _oled->print("LONG=stop");
+    _oled->display();
+}
+
 // ============================================================
 // State machine
 // ============================================================
@@ -296,8 +344,15 @@ void menuUpdate() {
                 _state = STATE_FALSEPOS_MENU;
                 _fpSel = 0;
                 _needsRedraw = true;
+            } else if (_mainSel == MAIN_RID_SPOOFER) {
+                ridStart();
+                _state = STATE_RID_ACTIVE;
+                _needsRedraw = true;
+            } else if (_mainSel == MAIN_COMBINED) {
+                combinedStart();
+                _state = STATE_COMBINED_ACTIVE;
+                _needsRedraw = true;
             }
-            // Mode 1 (RID) and Mode 4 (Combined) not yet implemented
         }
         if (_needsRedraw) { drawMainMenu(); _needsRedraw = false; }
         break;
@@ -426,6 +481,44 @@ void menuUpdate() {
             if (_needsRedraw || (millis() - lastFpRefresh > 500)) {
                 drawFpActive();
                 lastFpRefresh = millis();
+                _needsRedraw = false;
+            }
+        }
+        break;
+
+    // --- RID Spoofer Active ---
+    case STATE_RID_ACTIVE:
+        ridUpdate();
+
+        if (btn == BTN_LONG) {
+            ridStop();
+            _state = STATE_MAIN_MENU;
+            _needsRedraw = true;
+        }
+        {
+            static unsigned long lastRidRefresh = 0;
+            if (_needsRedraw || (millis() - lastRidRefresh > 500)) {
+                drawRidActive();
+                lastRidRefresh = millis();
+                _needsRedraw = false;
+            }
+        }
+        break;
+
+    // --- Combined Mode Active ---
+    case STATE_COMBINED_ACTIVE:
+        combinedUpdate();
+
+        if (btn == BTN_LONG) {
+            combinedStop();
+            _state = STATE_MAIN_MENU;
+            _needsRedraw = true;
+        }
+        {
+            static unsigned long lastCmbRefresh = 0;
+            if (_needsRedraw || (millis() - lastCmbRefresh > 500)) {
+                drawCombinedActive();
+                lastCmbRefresh = millis();
                 _needsRedraw = false;
             }
         }

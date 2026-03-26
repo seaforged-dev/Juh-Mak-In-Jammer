@@ -8,6 +8,8 @@
 #include "menu.h"
 #include "rf_modes.h"
 #include "false_positive.h"
+#include "rid_spoofer.h"
+#include "combined_mode.h"
 #include "splash.h"
 
 // --- OLED Display ---
@@ -78,6 +80,8 @@ void setup() {
     // --- Initialize subsystems ---
     cwInit(&radio);
     fpInit(&radio);
+    ridInit();
+    combinedInit(&radio);
     menuInit(&display);
 
     // Hold boot screen for 2 seconds so user can read it
@@ -131,7 +135,9 @@ static void handleSerialCommands() {
         if (st == STATE_CW_ACTIVE)    cwStop();
         if (st == STATE_SWEEP_ACTIVE)  sweepStop();
         if (st == STATE_ELRS_ACTIVE)   elrsStop();
-        if (st == STATE_FP_ACTIVE)    fpStop();
+        if (st == STATE_FP_ACTIVE)      fpStop();
+        if (st == STATE_RID_ACTIVE)     ridStop();
+        if (st == STATE_COMBINED_ACTIVE) combinedStop();
         Serial.println("TX stopped via serial.");
         break;
 
@@ -156,7 +162,8 @@ void loop() {
     static bool ledState = false;
     AppState st = menuGetState();
     bool txActive = (st == STATE_CW_ACTIVE || st == STATE_SWEEP_ACTIVE
-                     || st == STATE_ELRS_ACTIVE || st == STATE_FP_ACTIVE);
+                     || st == STATE_ELRS_ACTIVE || st == STATE_FP_ACTIVE
+                     || st == STATE_RID_ACTIVE || st == STATE_COMBINED_ACTIVE);
     unsigned long blinkRate = txActive ? 200 : 1000;
 
     if (millis() - lastBlink >= blinkRate) {
