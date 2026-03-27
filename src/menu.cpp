@@ -98,8 +98,20 @@ static void drawMainMenu() {
         "[5] Swarm Sim",
     };
 
-    for (uint8_t i = 0; i < MAIN_COUNT; i++) {
-        drawMenuItem(i, _mainSel, labels[i], 14 + i * 12);
+    // Scrollable: show 4 items at a time
+    static const uint8_t VISIBLE = 4;
+    uint8_t scrollTop = 0;
+    if (_mainSel >= VISIBLE) scrollTop = _mainSel - VISIBLE + 1;
+
+    for (uint8_t v = 0; v < VISIBLE && (scrollTop + v) < MAIN_COUNT; v++) {
+        uint8_t i = scrollTop + v;
+        drawMenuItem(i, _mainSel, labels[i], 14 + v * 10);
+    }
+
+    // Scroll indicator
+    if (scrollTop + VISIBLE < MAIN_COUNT) {
+        _oled->setCursor(122, 44);
+        _oled->print("v");
     }
 
     _oled->setCursor(0, 56);
@@ -120,10 +132,22 @@ static void drawSigGenMenu() {
         "<< Back",
     };
 
-    for (uint8_t i = 0; i < SIGGEN_COUNT; i++) {
-        drawMenuItem(i, _siggenSel, labels[i], 14 + i * 10);
+    static const uint8_t VISIBLE = 4;
+    uint8_t scrollTop = 0;
+    if (_siggenSel >= VISIBLE) scrollTop = _siggenSel - VISIBLE + 1;
+
+    for (uint8_t v = 0; v < VISIBLE && (scrollTop + v) < SIGGEN_COUNT; v++) {
+        uint8_t i = scrollTop + v;
+        drawMenuItem(i, _siggenSel, labels[i], 14 + v * 10);
     }
 
+    if (scrollTop + VISIBLE < SIGGEN_COUNT) {
+        _oled->setCursor(122, 44);
+        _oled->print("v");
+    }
+
+    _oled->setCursor(0, 56);
+    _oled->print("SHORT=nav  LONG=sel");
     _oled->display();
 }
 
@@ -168,13 +192,11 @@ static void drawSweepActive() {
     }
 
     _oled->setCursor(0, 42);
-    _oled->printf("Step:%.0fkHz Dwell:%uus", s.stepMHz * 1000.0f, s.dwellUs);
+    _oled->printf("Step:%.0fkHz Dw:%uus", s.stepMHz * 1000.0f, s.dwellUs);
     _oled->setCursor(0, 52);
-    _oled->printf("Pwr:%ddBm ", s.powerDbm);
-    _oled->print(s.running ? "TX" : "OFF");
+    _oled->printf("Pwr:%ddBm %s", s.powerDbm, s.running ? "TX" : "OFF");
 
-    _oled->setCursor(0, 58);
-    _oled->print("SH=step  LG=stop");
+    // No room for help text — sweep shows enough info
     _oled->display();
 }
 
@@ -185,13 +207,13 @@ static void drawElrsActive() {
     ElrsParams e = elrsGetParams();
 
     _oled->setCursor(0, 14);
-    _oled->printf("Ch: %u/80  %.2f MHz", e.channelIndex, e.currentMHz);
+    _oled->printf("Ch:%u/80 %.1f MHz", e.channelIndex, e.currentMHz);
     _oled->setCursor(0, 24);
     _oled->printf("Pkts: %lu", (unsigned long)e.packetCount);
     _oled->setCursor(0, 34);
     _oled->printf("Hops: %lu", (unsigned long)e.hopCount);
     _oled->setCursor(0, 44);
-    _oled->printf("Pwr: %d dBm  SF6 BW500", e.powerDbm);
+    _oled->printf("Pwr:%ddBm SF6 BW500", e.powerDbm);
 
     _oled->setCursor(0, 56);
     _oled->print("LONG=stop");
@@ -279,11 +301,11 @@ static void drawRidActive() {
     _oled->setCursor(0, 24);
     _oled->printf("Alt: %.0f m", r.altitude);
     _oled->setCursor(0, 34);
-    _oled->printf("WiFi: %lu  BLE: %lu",
+    _oled->printf("W:%lu B:%lu",
                   (unsigned long)r.wifiPackets,
                   (unsigned long)r.blePackets);
     _oled->setCursor(0, 44);
-    _oled->print("TX: WiFi beacons + BLE");
+    _oled->print("TX: WiFi + BLE");
 
     _oled->setCursor(0, 56);
     _oled->print("LONG=stop");
@@ -301,11 +323,11 @@ static void drawCombinedActive() {
                   (unsigned long)c.ridWifiPkts,
                   (unsigned long)c.ridBlePkts);
     _oled->setCursor(0, 24);
-    _oled->printf("ELRS: %lu pkts %lu hops",
+    _oled->printf("ELRS: %lu pk %lu hp",
                   (unsigned long)c.elrsPkts,
                   (unsigned long)c.elrsHops);
     _oled->setCursor(0, 34);
-    _oled->print("Core0:WiFi+BLE Core1:SX1262");
+    _oled->print("C0:WiFi+BLE C1:ELRS");
     _oled->setCursor(0, 44);
     _oled->printf("Elapsed: %lu sec", (unsigned long)c.elapsedSec);
 
@@ -570,13 +592,13 @@ void menuUpdate() {
 
                 CrossfireParams cp = crossfireGetParams();
                 _oled->setCursor(0, 14);
-                _oled->printf("Ch: %u/100  %.2f MHz", cp.channelIndex, cp.currentMHz);
+                _oled->printf("Ch: %u/100  %.1f MHz", cp.channelIndex, cp.currentMHz);
                 _oled->setCursor(0, 24);
                 _oled->printf("Pkts: %lu", (unsigned long)cp.packetCount);
                 _oled->setCursor(0, 34);
                 _oled->printf("Hops: %lu", (unsigned long)cp.hopCount);
                 _oled->setCursor(0, 44);
-                _oled->printf("Pwr: %d dBm  FSK 85k", cp.powerDbm);
+                _oled->printf("Pwr:%ddBm FSK 85k", cp.powerDbm);
                 _oled->setCursor(0, 56);
                 _oled->print("LONG=stop");
                 _oled->display();
