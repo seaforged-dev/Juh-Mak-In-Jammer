@@ -268,6 +268,12 @@ static void bleInit() {
 
     esp_ble_gap_register_callback(bleGapCallback);
 
+    // Set a random static BLE address (two MSBs = 1 per BLE spec)
+    uint8_t rand_addr[6];
+    esp_fill_random(rand_addr, 6);
+    rand_addr[0] |= 0xC0;
+    esp_ble_gap_set_rand_addr(rand_addr);
+
     _bleReady = true;
     Serial.println("RID: BLE initialized for advertising");
 }

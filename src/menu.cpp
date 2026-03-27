@@ -5,6 +5,7 @@
 #include "false_positive.h"
 #include "rid_spoofer.h"
 #include "combined_mode.h"
+#include "swarm_sim.h"
 
 // ============================================================
 // Menu state machine + button debouncer
@@ -92,6 +93,7 @@ static void drawMainMenu() {
         "[2] RF Sig Gen",
         "[3] False Pos Gen",
         "[4] Combined",
+        "[5] Swarm Sim",
     };
 
     for (uint8_t i = 0; i < MAIN_COUNT; i++) {
@@ -325,6 +327,15 @@ AppState menuGetState() {
     return _state;
 }
 
+void menuSetState(AppState s) {
+    _state = s;
+    _needsRedraw = true;
+}
+
+void menuRequestRedraw() {
+    _needsRedraw = true;
+}
+
 void menuUpdate() {
     ButtonPress btn = buttonRead();
 
@@ -351,6 +362,10 @@ void menuUpdate() {
             } else if (_mainSel == MAIN_COMBINED) {
                 combinedStart();
                 _state = STATE_COMBINED_ACTIVE;
+                _needsRedraw = true;
+            } else if (_mainSel == MAIN_SWARM) {
+                swarmStart();
+                _state = STATE_SWARM_ACTIVE;
                 _needsRedraw = true;
             }
         }
@@ -519,6 +534,46 @@ void menuUpdate() {
             if (_needsRedraw || (millis() - lastCmbRefresh > 500)) {
                 drawCombinedActive();
                 lastCmbRefresh = millis();
+                _needsRedraw = false;
+            }
+        }
+        break;
+
+    // --- Swarm Simulator Active ---
+    case STATE_SWARM_ACTIVE:
+        swarmUpdate();
+
+        if (btn == BTN_SHORT) {
+            swarmCycleCount();
+            _needsRedraw = true;
+        } else if (btn == BTN_LONG) {
+            swarmStop();
+            _state = STATE_MAIN_MENU;
+            _needsRedraw = true;
+        }
+        {
+            static unsigned long lastSwarmRefresh = 0;
+            if (_needsRedraw || (millis() - lastSwarmRefresh > 500)) {
+                // Draw swarm status on OLED
+                _oled->clearDisplay();
+                _oled->setTextSize(1);
+                _oled->setTextColor(SSD1306_WHITE);
+                _oled->setCursor(0, 0);
+                _oled->println("SWARM SIM - TX");
+                _oled->drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
+
+                SwarmParams sp = swarmGetParams();
+                _oled->setCursor(0, 14);
+                _oled->printf("Drones: %d", sp.droneCount);
+                _oled->setCursor(0, 24);
+                _oled->printf("Beacons: %lu", (unsigned long)sp.beaconCount);
+                _oled->setCursor(0, 34);
+                _oled->printf("Elapsed: %lu sec", (unsigned long)sp.elapsedSec);
+                _oled->setCursor(0, 56);
+                _oled->print("SH=count  LG=stop");
+                _oled->display();
+
+                lastSwarmRefresh = millis();
                 _needsRedraw = false;
             }
         }

@@ -20,6 +20,7 @@ enum AppState {
     STATE_FP_ACTIVE,      // False positive mode running
     STATE_RID_ACTIVE,     // Mode 1: RID spoofer running
     STATE_COMBINED_ACTIVE,// Mode 4: Combined RID + ELRS
+    STATE_SWARM_ACTIVE,   // Mode 5: Drone swarm simulator
 };
 
 // Main menu item indices
@@ -28,6 +29,7 @@ enum MainMenuItem {
     MAIN_RF_SIGGEN,
     MAIN_FALSE_POS,
     MAIN_COMBINED,
+    MAIN_SWARM,
     MAIN_COUNT  // sentinel — always last
 };
 
@@ -48,10 +50,21 @@ enum ButtonPress {
     BTN_LONG     // >= 500 ms
 };
 
+// False positive submenu indices
+enum FpMenuItem {
+    FP_MENU_LORAWAN = 0,
+    FP_MENU_ISM_BURST,
+    FP_MENU_MIXED,
+    FP_MENU_BACK,
+    FP_MENU_COUNT
+};
+
 // --- Public API ---
 void menuInit(Adafruit_SSD1306 *oled);
 void menuUpdate();           // call every loop() iteration
 AppState menuGetState();
+void menuSetState(AppState s);  // set state directly (for serial mode switching)
+void menuRequestRedraw();       // force OLED redraw on next update
 
 // Button sampling — call from loop()
 ButtonPress buttonRead();

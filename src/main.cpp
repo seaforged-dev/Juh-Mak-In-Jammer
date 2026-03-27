@@ -10,6 +10,7 @@
 #include "false_positive.h"
 #include "rid_spoofer.h"
 #include "combined_mode.h"
+#include "swarm_sim.h"
 #include "splash.h"
 
 // --- OLED Display ---
@@ -82,6 +83,7 @@ void setup() {
     fpInit(&radio);
     ridInit();
     combinedInit(&radio);
+    swarmInit();
     menuInit(&display);
 
     // Hold boot screen for 2 seconds so user can read it
@@ -94,13 +96,33 @@ void setup() {
     Serial.println("  SHORT press = cycle menu");
     Serial.println("  LONG  press = select/confirm");
     Serial.println();
-    Serial.println("Serial commands (active during TX):");
+    Serial.println("Serial commands:");
+    Serial.println("  c = CW tone mode");
+    Serial.println("  e = ELRS 915 FHSS mode");
+    Serial.println("  b = Band sweep mode");
+    Serial.println("  r = RID spoofer (WiFi+BLE)");
+    Serial.println("  m = Mixed false positive (LoRaWAN+ELRS)");
+    Serial.println("  x = Combined (RID + ELRS dual-core)");
+    Serial.println("  w = Drone swarm simulator");
+    Serial.println("  p = cycle TX power");
     Serial.println("  d = cycle dwell time (sweep)");
     Serial.println("  s = cycle step size (sweep)");
-    Serial.println("  p = cycle TX power (all modes)");
+    Serial.println("  n = cycle swarm drone count (1/4/8/16)");
     Serial.println("  q = stop TX and return to menu");
 
     digitalWrite(LED_PIN, LOW);
+}
+
+// --- Stop whatever mode is currently active ---
+static void stopCurrentMode() {
+    AppState st = menuGetState();
+    if (st == STATE_CW_ACTIVE)       cwStop();
+    if (st == STATE_SWEEP_ACTIVE)    sweepStop();
+    if (st == STATE_ELRS_ACTIVE)     elrsStop();
+    if (st == STATE_FP_ACTIVE)       fpStop();
+    if (st == STATE_RID_ACTIVE)      ridStop();
+    if (st == STATE_COMBINED_ACTIVE) combinedStop();
+    if (st == STATE_SWARM_ACTIVE)    swarmStop();
 }
 
 // --- Serial command parser ---
@@ -132,19 +154,72 @@ static void handleSerialCommands() {
         break;
 
     case 'q':
-        if (st == STATE_CW_ACTIVE)    cwStop();
-        if (st == STATE_SWEEP_ACTIVE)  sweepStop();
-        if (st == STATE_ELRS_ACTIVE)   elrsStop();
-        if (st == STATE_FP_ACTIVE)      fpStop();
-        if (st == STATE_RID_ACTIVE)     ridStop();
-        if (st == STATE_COMBINED_ACTIVE) combinedStop();
+        stopCurrentMode();
+        menuSetState(STATE_MAIN_MENU);
         Serial.println("TX stopped via serial.");
         break;
 
+    // --- Direct mode selection via serial ---
+    case 'c':   // CW Tone
+        stopCurrentMode();
+        cwStart();
+        menuSetState(STATE_CW_ACTIVE);
+        { CwParams p = cwGetParams();
+          Serial.printf("[MODE] CW Tone: %.2f MHz, %d dBm\n", p.freqMHz, p.powerDbm); }
+        break;
+
+    case 'e':   // ELRS 915 FHSS
+        stopCurrentMode();
+        elrsStart();
+        menuSetState(STATE_ELRS_ACTIVE);
+        Serial.printf("[MODE] ELRS 915 FHSS: %d dBm\n", rfGetPower());
+        break;
+
+    case 'b':   // Band Sweep
+        stopCurrentMode();
+        sweepStart();
+        menuSetState(STATE_SWEEP_ACTIVE);
+        { SweepParams sw = sweepGetParams();
+          Serial.printf("[MODE] Band Sweep: %.1f-%.1f MHz, step %.0f kHz, %d dBm\n",
+                        sw.startMHz, sw.endMHz, sw.stepMHz * 1000.0f, sw.powerDbm); }
+        break;
+
+    case 'r':   // Remote ID Spoofer
+        stopCurrentMode();
+        ridStart();
+        menuSetState(STATE_RID_ACTIVE);
+        Serial.println("[MODE] RID Spoofer: WiFi+BLE beacons");
+        break;
+
+    case 'm':   // Mixed False Positive (LoRaWAN + ELRS)
+        stopCurrentMode();
+        fpStart(FP_MIXED);
+        menuSetState(STATE_FP_ACTIVE);
+        Serial.printf("[MODE] Mixed FP (LoRaWAN+ELRS): %d dBm\n", rfGetPower());
+        break;
+
+    case 'x':   // Combined (RID + ELRS dual-core)
+        stopCurrentMode();
+        combinedStart();
+        menuSetState(STATE_COMBINED_ACTIVE);
+        Serial.println("[MODE] Combined: RID(Core0) + ELRS(Core1)");
+        break;
+
+    case 'w':   // Drone Swarm Simulator
+        stopCurrentMode();
+        swarmStart();
+        menuSetState(STATE_SWARM_ACTIVE);
+        { SwarmParams sp = swarmGetParams();
+          Serial.printf("[MODE] Swarm: %d drones, WiFi RID beacons\n", sp.droneCount); }
+        break;
+
+    case 'n':   // Cycle swarm drone count
+        swarmCycleCount();
+        break;
+
     default:
-        // Ignore newlines, carriage returns, and unknown chars
         if (cmd > ' ') {
-            Serial.printf("Unknown command: '%c'. Use d/s/p/q.\n", cmd);
+            Serial.printf("Unknown command: '%c'. Use c/e/b/r/m/x/w/n/p/q.\n", cmd);
         }
         break;
     }
@@ -163,7 +238,8 @@ void loop() {
     AppState st = menuGetState();
     bool txActive = (st == STATE_CW_ACTIVE || st == STATE_SWEEP_ACTIVE
                      || st == STATE_ELRS_ACTIVE || st == STATE_FP_ACTIVE
-                     || st == STATE_RID_ACTIVE || st == STATE_COMBINED_ACTIVE);
+                     || st == STATE_RID_ACTIVE || st == STATE_COMBINED_ACTIVE
+                     || st == STATE_SWARM_ACTIVE);
     unsigned long blinkRate = txActive ? 200 : 1000;
 
     if (millis() - lastBlink >= blinkRate) {

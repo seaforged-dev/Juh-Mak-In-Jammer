@@ -48,15 +48,20 @@ void cwInit(SX1262 *radio) {
 void cwStart() {
     if (!_radio) return;
 
-    float freq = CW_FREQ_PRESETS[_freqIndex];
-    _radio->setFrequency(freq);
+    // Full reset + begin ensures clean state from any prior mode
+    _radio->standby();
+    _radio->reset();
+    delay(100);
+    _radio->begin(CW_FREQ_PRESETS[_freqIndex], 125.0, 9, 7,
+                  RADIOLIB_SX126X_SYNC_WORD_PRIVATE, _powerDbm, 8, 1.8, false);
+
     _radio->setOutputPower(_powerDbm);
 
     // transmitDirect(0) = unmodulated carrier at the configured frequency
     int state = _radio->transmitDirect(0);
     if (state == RADIOLIB_ERR_NONE) {
         _txOn = true;
-        Serial.printf("CW TX ON: %.2f MHz @ %d dBm\n", freq, _powerDbm);
+        Serial.printf("CW TX ON: %.2f MHz @ %d dBm\n", CW_FREQ_PRESETS[_freqIndex], _powerDbm);
     } else {
         Serial.printf("CW TX FAILED (error %d)\n", state);
         _txOn = false;
@@ -122,6 +127,13 @@ static uint16_t sweepTotalSteps() {
 
 void sweepStart() {
     if (!_radio) return;
+
+    // Full reset ensures clean state when switching from LoRa/FSK modes
+    _radio->standby();
+    _radio->reset();
+    delay(100);
+    _radio->begin(SWEEP_START_MHZ, 125.0, 9, 7,
+                  RADIOLIB_SX126X_SYNC_WORD_PRIVATE, _powerDbm, 8, 1.8, false);
 
     _sweepCurrent = SWEEP_START_MHZ;
     _sweepStepIdx = 0;
@@ -287,8 +299,12 @@ void elrsStart() {
     _elrsPacketCount = 0;
     _elrsHopCount = 0;
 
+    // Full reset ensures clean state when switching from CW/sweep modes
+    _radio->reset();
+    delay(100);
+
     // Configure radio for ELRS 200Hz mode: LoRa SF6 BW500
-    _radio->standby();
+    // TCXO voltage 1.8V is required for LilyGo T3-S3 after hardware reset
     int state = _radio->begin(
         elrsChanToFreq(_elrsHopSeq[0]),  // start on first hop channel
         500.0,    // BW 500 kHz
@@ -297,8 +313,8 @@ void elrsStart() {
         RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
         _powerDbm,
         8,        // preamble length
-        0,        // TCXO voltage (0 = use default)
-        false     // use LDO (not DC-DC) — safer default
+        1.8,      // TCXO voltage — T3-S3 has 1.8V TCXO
+        false     // use LDO (not DC-DC)
     );
 
     if (state != RADIOLIB_ERR_NONE) {
@@ -330,9 +346,6 @@ void elrsStop() {
     Serial.printf("ELRS TX OFF: %lu packets, %lu hops\n",
                   (unsigned long)_elrsPacketCount,
                   (unsigned long)_elrsHopCount);
-
-    // Reconfigure radio back to basic mode for other modes to use
-    _radio->begin(915.0);
 }
 
 void elrsUpdate() {
