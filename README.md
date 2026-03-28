@@ -63,7 +63,7 @@ Same board as SENTRY-RF — you can flash either firmware to the same hardware.
 
 ```bash
 # Clone
-git clone https://github.com/seaforged-dev/Juh-Mak-In-Jammer.git
+git clone https://github.com/Seaforged/Juh-Mak-In-Jammer.git
 cd Juh-Mak-In-Jammer
 
 # Build
