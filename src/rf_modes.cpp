@@ -331,8 +331,8 @@ void elrsStart() {
     _elrsRunning = true;
     _elrsLastHopUs = micros();
 
-    // Transmit first packet immediately
-    _radio->transmit(ELRS_PAYLOAD, sizeof(ELRS_PAYLOAD));
+    // Transmit first packet immediately (non-blocking)
+    _radio->startTransmit(ELRS_PAYLOAD, sizeof(ELRS_PAYLOAD));
     _elrsPacketCount++;
 
     Serial.printf("ELRS TX ON: SF6 BW500, 80ch FHSS, 200Hz, %d dBm\n", _powerDbm);
@@ -354,7 +354,7 @@ void elrsUpdate() {
     unsigned long nowUs = micros();
     if ((nowUs - _elrsLastHopUs) < ELRS_HOP_INTERVAL_US) return;
 
-    _elrsLastHopUs = nowUs;
+    _elrsLastHopUs += ELRS_HOP_INTERVAL_US;  // accumulate to prevent drift
 
     // Advance to next channel in the hop sequence
     _elrsHopIdx = (_elrsHopIdx + 1) % ELRS_NUM_CHANNELS;
@@ -363,9 +363,12 @@ void elrsUpdate() {
     float nextFreq = elrsChanToFreq(_elrsHopSeq[_elrsHopIdx]);
     _elrsCurrentMHz = nextFreq;
 
-    // Hop: retune and transmit
+    // Hop: retune and transmit. startTransmit blocks ~6.7ms (SX1262 BUSY
+    // stays high for full TX airtime at SF6/BW500). This limits max hop rate
+    // to ~149 Hz — a hardware/physics constraint, not a software one.
+    _radio->standby();
     _radio->setFrequency(nextFreq);
-    _radio->transmit(ELRS_PAYLOAD, sizeof(ELRS_PAYLOAD));
+    _radio->startTransmit(ELRS_PAYLOAD, sizeof(ELRS_PAYLOAD));
     _elrsPacketCount++;
 }
 

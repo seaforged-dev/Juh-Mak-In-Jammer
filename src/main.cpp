@@ -258,5 +258,8 @@ void loop() {
         digitalWrite(LED_PIN, ledState ? HIGH : LOW);
     }
 
-    delay(10);
+    // yield() feeds the watchdog with minimal overhead (~1ms).
+    // TX modes are rate-limited by SX1262 airtime (~6.7ms/hop at SF6/BW500),
+    // so the 1ms yield cost is negligible vs the 6.7ms TX blocking.
+    yield();
 }
