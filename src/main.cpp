@@ -73,7 +73,9 @@ void setup() {
     loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 
     Serial.print("SX1262 init... ");
-    int state = radio.begin(915.0);
+    int state = radio.begin(915.0, 125.0, 9, 7,
+                            RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8,
+                            1.8, false);
     if (state == RADIOLIB_ERR_NONE) {
         Serial.println("OK");
     } else {

@@ -62,7 +62,7 @@ static void lorawanConfigRadio() {
         RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
         rfGetPower(),
         8,           // preamble
-        0, false
+        1.8, false
     );
     _radio->explicitHeader();
 }
@@ -112,7 +112,7 @@ static void ismBurstTransmit() {
         156.2,     // RX bandwidth (doesn't matter for TX, but required)
         rfGetPower(),
         8,         // preamble
-        0, false
+        1.8, false
     );
 
     // Generate random noise payload sized to approximate the burst duration
@@ -154,7 +154,7 @@ static constexpr uint32_t MIX_HOP_US         = 5000;  // 200 Hz
 static uint8_t  _mixHopSeq[MIX_ELRS_CHANNELS];
 static uint8_t  _mixHopIdx = 0;
 static unsigned long _mixLastHopUs = 0;
-static const uint8_t MIX_ELRS_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00 };
+static const uint8_t MIX_ELRS_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 static void mixBuildHopSequence() {
     for (uint8_t i = 0; i < MIX_ELRS_CHANNELS; i++) _mixHopSeq[i] = i;
@@ -173,7 +173,7 @@ static void mixConfigElrs() {
     float freq = MIX_ELRS_START + (_mixHopSeq[_mixHopIdx] * MIX_ELRS_SPACING);
     _radio->begin(freq, 500.0, 6, 5,
                   RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
-                  rfGetPower(), 8, 0, false);
+                  rfGetPower(), 8, 1.8, false);
     _radio->explicitHeader();
     _mixedElrsConfigured = true;
 }
@@ -252,7 +252,8 @@ void fpStop() {
     _fpRunning = false;
 
     // Reconfigure radio back to default for other modes
-    _radio->begin(915.0);
+    _radio->begin(915.0, 125.0, 9, 7,
+                  RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 1.8, false);
 
     Serial.printf("FP stopped: %lu LoRaWAN, %lu bursts, %lu ELRS\n",
                   (unsigned long)_loraCount,

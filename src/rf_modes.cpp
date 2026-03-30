@@ -264,8 +264,8 @@ static uint32_t _elrsHopCount   = 0;
 static float    _elrsCurrentMHz = ELRS_BAND_START;
 static unsigned long _elrsLastHopUs = 0;
 
-// 4-byte dummy payload mimicking ELRS frame structure
-static const uint8_t ELRS_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00 };
+// 8-byte dummy payload matching real ELRS packet size
+static const uint8_t ELRS_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 // Build a pseudo-random hop sequence using Fisher-Yates shuffle.
 // Seed can be changed to simulate different ELRS binding UIDs.

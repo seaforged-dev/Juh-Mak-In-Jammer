@@ -32,7 +32,7 @@ static constexpr float    CMB_ELRS_SPACING  = (CMB_ELRS_END - CMB_ELRS_START) / 
 static constexpr uint32_t CMB_HOP_US        = 5000;
 
 static uint8_t _cmbHopSeq[CMB_ELRS_CHANNELS];
-static const uint8_t CMB_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00 };
+static const uint8_t CMB_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 static void cmbBuildHopSequence() {
     for (uint8_t i = 0; i < CMB_ELRS_CHANNELS; i++) _cmbHopSeq[i] = i;
@@ -56,7 +56,7 @@ static void elrsTask(void *param) {
     float freq = CMB_ELRS_START + (_cmbHopSeq[0] * CMB_ELRS_SPACING);
     radio->begin(freq, 500.0, 6, 5,
                  RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
-                 rfGetPower(), 8, 0, false);
+                 rfGetPower(), 8, 1.8, false);
     radio->explicitHeader();
 
     unsigned long lastHopUs = micros();
@@ -80,7 +80,8 @@ static void elrsTask(void *param) {
     }
 
     radio->standby();
-    radio->begin(915.0);  // reset to default config
+    radio->begin(915.0, 125.0, 9, 7,
+                 RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 1.8, false);
     vTaskDelete(NULL);
 }
 
