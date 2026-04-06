@@ -10,6 +10,7 @@
 #include "power_ramp.h"
 #include "sik_radio.h"
 #include "mlrs_sim.h"
+#include "custom_lora.h"
 
 // ============================================================
 // Menu state machine + button debouncer
@@ -768,6 +769,44 @@ void menuUpdate() {
                 _oled->display();
 
                 lastMlrsRefresh = millis();
+                _needsRedraw = false;
+            }
+        }
+        break;
+
+    // --- Custom LoRa Active ---
+    case STATE_CUSTOM_LORA_ACTIVE:
+        customLoraUpdate();
+
+        if (btn == BTN_LONG) {
+            customLoraStop();
+            _state = STATE_SIGGEN_MENU;
+            _needsRedraw = true;
+        }
+        {
+            static unsigned long lastClRefresh = 0;
+            if (_needsRedraw || (millis() - lastClRefresh > 250)) {
+                _oled->clearDisplay();
+                _oled->setTextSize(1);
+                _oled->setTextColor(SSD1306_WHITE);
+                _oled->setCursor(0, 0);
+                _oled->println("CUSTOM LORA - TX");
+                _oled->drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
+
+                CustomLoraParams cp = customLoraGetParams();
+                _oled->setCursor(0, 14);
+                _oled->printf("%.3f MHz", cp.currentMHz);
+                _oled->setCursor(0, 24);
+                _oled->printf("SF%u BW%.0f %uHz", cp.cfg.sf, cp.cfg.bwKHz, cp.cfg.rateHz);
+                _oled->setCursor(0, 34);
+                _oled->printf("Pkts:%lu Hops:%lu", (unsigned long)cp.packetCount, (unsigned long)cp.hopCount);
+                _oled->setCursor(0, 44);
+                _oled->printf("Sync:0x%02X Pwr:%ddBm", cp.cfg.syncWord, cp.cfg.powerDbm);
+                _oled->setCursor(0, 56);
+                _oled->print("LONG=stop");
+                _oled->display();
+
+                lastClRefresh = millis();
                 _needsRedraw = false;
             }
         }

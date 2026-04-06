@@ -15,6 +15,7 @@
 #include "power_ramp.h"
 #include "sik_radio.h"
 #include "mlrs_sim.h"
+#include "custom_lora.h"
 #include "protocol_params.h"
 #include "splash.h"
 
@@ -95,6 +96,7 @@ void setup() {
     powerRampInit(&radio);
     sikInit(&radio);
     mlrsInit(&radio);
+    customLoraInit(&radio);
     menuInit(&display);
 
     // Hold boot screen for 2 seconds so user can read it
@@ -117,6 +119,8 @@ void setup() {
     Serial.println("  k1-k3 = SiK speed (64/125/250 kbps)");
     Serial.println("  l = mLRS 19Hz LoRa (default)");
     Serial.println("  l1-l3 = mLRS mode (19Hz/31Hz/50Hz-FSK)");
+    Serial.println("  u = Custom LoRa (start TX)");
+    Serial.println("  u? = show settings  uf/us/ub/ur/uh/up/uw = configure");
     Serial.println("  b = Band sweep mode");
     Serial.println("  r = RID spoofer (WiFi+BLE)");
     Serial.println("  m = Mixed false positive (LoRaWAN+ELRS)");
@@ -145,6 +149,7 @@ static void stopCurrentMode() {
     if (st == STATE_RAMP_ACTIVE)     powerRampStop();
     if (st == STATE_SIK_ACTIVE)      sikStop();
     if (st == STATE_MLRS_ACTIVE)     mlrsStop();
+    if (st == STATE_CUSTOM_LORA_ACTIVE) customLoraStop();
 }
 
 // --- Serial command parser ---
@@ -272,6 +277,37 @@ static void handleSerialCommands() {
         break;
     }
 
+    case 'u': { // Custom LoRa — u=start, u?=show, uXvalue=configure
+        delay(80);
+        if (!Serial.available()) {
+            // Bare 'u' — start transmission
+            stopCurrentMode();
+            customLoraStart();
+            menuSetState(STATE_CUSTOM_LORA_ACTIVE);
+        } else {
+            // Read subcommand + value into buffer
+            char buf[16];
+            uint8_t len = 0;
+            unsigned long deadline = millis() + 100;
+            while (len < sizeof(buf) - 1 && millis() < deadline) {
+                if (Serial.available()) {
+                    char c = Serial.read();
+                    if (c == '\n' || c == '\r') break;
+                    buf[len++] = c;
+                    deadline = millis() + 50;  // extend for more chars
+                }
+            }
+            buf[len] = '\0';
+
+            if (buf[0] == '?') {
+                customLoraPrintConfig();
+            } else if (len > 0) {
+                customLoraConfigure(buf);
+            }
+        }
+        break;
+    }
+
     case 'b':   // Band Sweep
         stopCurrentMode();
         sweepStart();
@@ -340,7 +376,8 @@ void loop() {
                      || st == STATE_CROSSFIRE_ACTIVE
                      || st == STATE_RAMP_ACTIVE
                      || st == STATE_SIK_ACTIVE
-                     || st == STATE_MLRS_ACTIVE);
+                     || st == STATE_MLRS_ACTIVE
+                     || st == STATE_CUSTOM_LORA_ACTIVE);
     unsigned long blinkRate = txActive ? 200 : 1000;
 
     if (millis() - lastBlink >= blinkRate) {

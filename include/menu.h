@@ -25,6 +25,7 @@ enum AppState {
     STATE_RAMP_ACTIVE,
     STATE_SIK_ACTIVE,
     STATE_MLRS_ACTIVE,
+    STATE_CUSTOM_LORA_ACTIVE,
 };
 
 // Main menu item indices
