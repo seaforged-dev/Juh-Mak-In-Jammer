@@ -510,6 +510,10 @@ ElrsParams elrsGetParams() {
     return ElrsParams{
         _elrsCurrentMHz,
         _elrsHopSeq[_elrsHopIdx],
+        _elrsDomain->channels,
+        _elrsRate->sf,
+        _elrsRate->rateHz,
+        _elrsDomain->name,
         _elrsPacketCount,
         _elrsHopCount,
         _powerDbm,

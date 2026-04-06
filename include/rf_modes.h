@@ -50,6 +50,10 @@ int8_t rfGetPower();           // current power setting in dBm
 struct ElrsParams {
     float currentMHz;
     uint8_t channelIndex;
+    uint8_t numChannels;
+    uint8_t sf;
+    uint16_t rateHz;
+    const char* domainName;
     uint32_t packetCount;
     uint32_t hopCount;
     int8_t powerDbm;

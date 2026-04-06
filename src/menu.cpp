@@ -206,18 +206,22 @@ static void drawSweepActive() {
 
 static void drawElrsActive() {
     _oled->clearDisplay();
-    drawHeader("ELRS 915 - FHSS TX");
 
     ElrsParams e = elrsGetParams();
 
+    // Dynamic header showing domain name
+    char hdr[22];
+    snprintf(hdr, sizeof(hdr), "ELRS %s - TX", e.domainName);
+    drawHeader(hdr);
+
     _oled->setCursor(0, 14);
-    _oled->printf("Ch:%u/40 %.1f MHz", e.channelIndex, e.currentMHz);
+    _oled->printf("Ch:%u/%u %.1f MHz", e.channelIndex, e.numChannels, e.currentMHz);
     _oled->setCursor(0, 24);
     _oled->printf("Pkts: %lu", (unsigned long)e.packetCount);
     _oled->setCursor(0, 34);
     _oled->printf("Hops: %lu", (unsigned long)e.hopCount);
     _oled->setCursor(0, 44);
-    _oled->printf("Pwr:%ddBm SF6 BW500", e.powerDbm);
+    _oled->printf("Pwr:%ddBm SF%u %uHz", e.powerDbm, e.sf, e.rateHz);
 
     _oled->setCursor(0, 56);
     _oled->print("LONG=stop");
