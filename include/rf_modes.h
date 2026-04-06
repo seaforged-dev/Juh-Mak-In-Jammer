@@ -56,11 +56,13 @@ struct ElrsParams {
     bool running;
 };
 
-// --- ELRS 915 Simulation API ---
-void elrsSetRate(uint8_t rateIndex);  // set air rate (0-5, indexes ELRS_AIR_RATES)
-void elrsStart();              // begin FHSS transmission
-void elrsStop();               // stop and return to standby
-void elrsUpdate();             // call every loop() — handles hop timing
-ElrsParams elrsGetParams();    // get current state for display
+// --- ELRS FHSS Simulation API ---
+void elrsSetRate(uint8_t rateIndex);    // set air rate (0-5, indexes ELRS_AIR_RATES)
+void elrsSetDomain(uint8_t domIndex);   // set domain (0-8, indexes ELRS_DOMAINS)
+void elrsStartBinding();                // begin binding→connected sequence
+void elrsStart();                       // begin FHSS transmission (connected state)
+void elrsStop();                        // stop and return to standby
+void elrsUpdate();                      // call every loop() — handles hop timing + binding FSM
+ElrsParams elrsGetParams();             // get current state for display
 
 #endif // RF_MODES_H

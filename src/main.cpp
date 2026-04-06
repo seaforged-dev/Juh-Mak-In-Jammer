@@ -13,6 +13,7 @@
 #include "swarm_sim.h"
 #include "crossfire.h"
 #include "power_ramp.h"
+#include "protocol_params.h"
 #include "splash.h"
 
 // --- OLED Display ---
@@ -106,6 +107,8 @@ void setup() {
     Serial.println("  c = CW tone mode");
     Serial.println("  e = ELRS 200Hz FCC915 (default)");
     Serial.println("  e1-e6 = ELRS rate (200/100/50/25/D250/D500)");
+    Serial.println("  e1f/a/u/i = ELRS domain (FCC/AU/EU/IN)");
+    Serial.println("  e1fb = ELRS binding→connected sequence");
     Serial.println("  b = Band sweep mode");
     Serial.println("  r = RID spoofer (WiFi+BLE)");
     Serial.println("  m = Mixed false positive (LoRaWAN+ELRS)");
@@ -177,20 +180,50 @@ static void handleSerialCommands() {
           Serial.printf("[MODE] CW Tone: %.2f MHz, %d dBm\n", p.freqMHz, p.powerDbm); }
         break;
 
-    case 'e': { // ELRS FHSS — optional digit selects air rate (e1-e6)
-        // Peek for a following digit within 50ms
-        delay(50);
-        uint8_t rateIdx = 0;  // default: 200 Hz
+    case 'e': { // ELRS FHSS — e[1-6][f/a/u/i][b]
+        // Parse optional rate digit, domain letter, binding flag
+        delay(80);  // allow multi-char command to arrive
+        uint8_t rateIdx = 0;   // default: 200 Hz
+        uint8_t domIdx  = ELRS_DOMAIN_FCC915;  // default: FCC915
+        bool    binding = false;
+
+        // Rate digit (e1-e6)
         if (Serial.available()) {
-            char next = Serial.peek();
-            if (next >= '1' && next <= '6') {
-                Serial.read();  // consume the digit
-                rateIdx = next - '1';  // '1'→0, '2'→1, ... '6'→5
+            char c = Serial.peek();
+            if (c >= '1' && c <= '6') {
+                Serial.read();
+                rateIdx = c - '1';
             }
         }
+        delay(20);
+
+        // Domain letter (f/a/u/i)
+        if (Serial.available()) {
+            char c = Serial.peek();
+            switch (c) {
+            case 'f': Serial.read(); domIdx = ELRS_DOMAIN_FCC915; break;
+            case 'a': Serial.read(); domIdx = ELRS_DOMAIN_AU915;  break;
+            case 'u': Serial.read(); domIdx = ELRS_DOMAIN_EU868;  break;
+            case 'i': Serial.read(); domIdx = ELRS_DOMAIN_IN866;  break;
+            default: break;  // no domain letter → keep default
+            }
+        }
+        delay(20);
+
+        // Binding flag (b)
+        if (Serial.available() && Serial.peek() == 'b') {
+            Serial.read();
+            binding = true;
+        }
+
         stopCurrentMode();
         elrsSetRate(rateIdx);
-        elrsStart();
+        elrsSetDomain(domIdx);
+        if (binding) {
+            elrsStartBinding();
+        } else {
+            elrsStart();
+        }
         menuSetState(STATE_ELRS_ACTIVE);
         break;
     }

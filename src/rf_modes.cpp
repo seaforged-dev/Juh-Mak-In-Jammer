@@ -266,10 +266,28 @@ static unsigned long _elrsLastPktUs = 0;
 static const uint8_t ELRS_PAYLOAD_8[]  = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 static const uint8_t ELRS_PAYLOAD_10[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA, 0x55, 0xBB };
 
+// Binding/beacon state machine — v2 §3.1.7
+enum ElrsState { ELRS_STATE_CONNECTED, ELRS_STATE_BINDING };
+static ElrsState _elrsState = ELRS_STATE_CONNECTED;
+static unsigned long _bindingStartMs = 0;
+static const uint32_t BINDING_DURATION_MS = 10000;  // 10 seconds on sync channel
+static unsigned long _bindingLastTxMs = 0;
+
 void elrsSetRate(uint8_t rateIndex) {
     if (rateIndex < ELRS_AIR_RATE_COUNT) {
         _elrsRate = &ELRS_AIR_RATES[rateIndex];
     }
+}
+
+void elrsSetDomain(uint8_t domIndex) {
+    if (domIndex < ELRS_DOMAIN_COUNT && domIndex != ELRS_DOMAIN_ISM2G4) {
+        _elrsDomain = &ELRS_DOMAINS[domIndex];
+    }
+}
+
+// Effective hop interval: DVDA always uses 2, standard uses domain's value
+static uint8_t elrsEffectiveHopInterval() {
+    return _elrsRate->isDvda ? _elrsRate->hopInterval : _elrsDomain->hopInterval;
 }
 
 // Build pseudo-random hop sequence using LCG-seeded Fisher-Yates shuffle.
@@ -345,16 +363,65 @@ void elrsStart() {
     _elrsPacketCount++;
     _elrsPktsSinceHop = 1;
 
+    _elrsState = ELRS_STATE_CONNECTED;
+
     // Protocol info output per v2 §7.2
+    uint8_t effHop = elrsEffectiveHopInterval();
     uint32_t pktIntervalUs = 1000000UL / rate.rateHz;
-    uint32_t dwellMs = (rate.hopInterval * pktIntervalUs) / 1000;
-    uint32_t hopsPerSec = rate.rateHz / rate.hopInterval;
+    uint32_t dwellMs = (effHop * pktIntervalUs) / 1000;
+    uint32_t hopsPerSec = rate.rateHz / effHop;
     Serial.printf("[ELRS-%s] %uch %.1f-%.1fMHz SF%u/BW%lu %uHz hop_every_%u sync_ch=%u\n",
                   dom.name, dom.channels, dom.freqStartMHz, dom.freqStopMHz,
-                  rate.sf, rate.bwHz / 1000, rate.rateHz, rate.hopInterval, dom.syncChannel);
+                  rate.sf, rate.bwHz / 1000, rate.rateHz, effHop, dom.syncChannel);
     Serial.printf("  Dwell: %lums/freq  Hops: %lu/s  Preamble: %usym  SyncWord: 0x%02X  Power: %d dBm\n",
                   (unsigned long)dwellMs, (unsigned long)hopsPerSec,
                   rate.preambleLen, SYNC_WORD_ELRS, _powerDbm);
+
+    // EU868 duty cycle warning — v2 §2.2
+    if (_elrsDomain == &ELRS_DOMAINS[ELRS_DOMAIN_EU868]) {
+        Serial.println("  WARNING: EU868 ETSI duty cycle limits (1%) apply in real deployments");
+    }
+}
+
+// Start in binding/beacon state — v2 §3.1.7
+// Transmits on sync channel at 1 Hz for 10 seconds, then transitions to FHSS
+void elrsStartBinding() {
+    if (!_radio) return;
+
+    const ElrsDomain&  dom  = *_elrsDomain;
+    const ElrsAirRate& rate = *_elrsRate;
+
+    _radio->reset();
+    delay(100);
+
+    // Configure radio on sync channel frequency
+    float syncFreq = elrsChanFreq(dom, dom.syncChannel);
+    int state = _radio->begin(
+        syncFreq,
+        (float)(rate.bwHz / 1000), rate.sf, rate.cr,
+        SYNC_WORD_ELRS, _powerDbm, rate.preambleLen, 1.8, false
+    );
+
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.printf("[ELRS] radio config FAILED (error %d)\n", state);
+        _elrsRunning = false;
+        return;
+    }
+
+    _radio->explicitHeader();
+    _radio->setCurrentLimit(140.0);
+
+    _elrsCurrentMHz = syncFreq;
+    _elrsRunning = true;
+    _elrsState = ELRS_STATE_BINDING;
+    _bindingStartMs = millis();
+    _bindingLastTxMs = 0;
+    _elrsPacketCount = 0;
+    _elrsHopCount = 0;
+    _elrsPktsSinceHop = 0;
+
+    Serial.printf("[ELRS-%s] BINDING: TX on sync channel (%.1f MHz) 1 Hz...\n",
+                  dom.name, syncFreq);
 }
 
 void elrsStop() {
@@ -371,16 +438,48 @@ void elrsStop() {
 void elrsUpdate() {
     if (!_elrsRunning || !_radio) return;
 
+    // --- Binding state: TX on sync channel at 1 Hz, then transition to FHSS ---
+    if (_elrsState == ELRS_STATE_BINDING) {
+        unsigned long nowMs = millis();
+
+        // Check for transition to connected
+        if ((nowMs - _bindingStartMs) >= BINDING_DURATION_MS) {
+            Serial.printf("[ELRS-%s] BINDING: 10s elapsed, transitioning to FHSS...\n",
+                          _elrsDomain->name);
+
+            // Build hop sequence and switch to connected FHSS
+            elrsBuildHopSequence(0xDEADBEEF);
+            _elrsHopIdx = 0;
+            _elrsHopCount = 0;
+            _elrsPktsSinceHop = 0;
+            _elrsLastPktUs = micros();
+            _elrsState = ELRS_STATE_CONNECTED;
+
+            Serial.printf("[ELRS-%s] CONNECTED: %uch FHSS active\n", _elrsDomain->name,
+                          _elrsDomain->channels);
+            return;
+        }
+
+        // Transmit beacon at 1 Hz on sync channel
+        if ((nowMs - _bindingLastTxMs) >= 1000) {
+            _bindingLastTxMs = nowMs;
+            _radio->startTransmit(ELRS_PAYLOAD_8, 8);
+            _elrsPacketCount++;
+        }
+        return;
+    }
+
+    // --- Connected state: normal FHSS hopping ---
     uint32_t pktIntervalUs = 1000000UL / _elrsRate->rateHz;
     unsigned long nowUs = micros();
     if ((nowUs - _elrsLastPktUs) < pktIntervalUs) return;
 
     _elrsLastPktUs += pktIntervalUs;  // accumulate to prevent drift
 
-    uint8_t numCh   = _elrsDomain->channels;
-    uint8_t hopEvery = _elrsRate->hopInterval;
+    uint8_t numCh    = _elrsDomain->channels;
+    uint8_t hopEvery = elrsEffectiveHopInterval();
 
-    // Hop every N packets (N from air rate config)
+    // Hop every N packets (N from domain for standard, 2 for DVDA)
     if (_elrsPktsSinceHop >= hopEvery) {
         _elrsPktsSinceHop = 0;
         _elrsHopIdx = (_elrsHopIdx + 1) % numCh;
