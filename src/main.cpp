@@ -47,6 +47,32 @@ static void showBootScreen() {
     display.display();
 }
 
+// --- Help Menu ---
+static void printHelp() {
+    Serial.printf("=== %s v%s — Drone Signal Emulator ===\n\n", JAMMER_NAME, JAMMER_VERSION);
+
+    Serial.println("DRONE PROTOCOLS:");
+    Serial.println("  e  ELRS FHSS      e1-e6=rate  f/a/u/i=domain  b=binding");
+    Serial.println("  k  SiK Radio      k1=64k  k2=125k  k3=250k");
+    Serial.println("  l  mLRS           l1=19Hz  l2=31Hz  l3=50Hz(FSK)");
+    Serial.println("  u  Custom LoRa    u?=settings  uf/us/ub/ur/uh/up/uw=config");
+
+    Serial.println("\nINFRASTRUCTURE (False Positive Testing):");
+    Serial.println("  m  LoRaWAN US915  Mixed FP (8 SB2 channels + ELRS)");
+    Serial.println("  f1 Meshtastic     16-sym preamble, sync 0x2B");
+    Serial.println("  f2 Helium PoC     5 hotspots, rotating SB2 channels");
+    Serial.println("  f3 LoRaWAN EU868  868.1/868.3/868.5 MHz");
+
+    Serial.println("\nSPECIAL MODES:");
+    Serial.println("  c  CW Tone        b=sweep  w=power ramp  x=combined");
+    Serial.println("  r  Remote ID      WiFi+BLE ASTM F3411 broadcast");
+    Serial.println("  w  Drone Swarm    n=cycle count (1/4/8/16)");
+
+    Serial.println("\nCONTROLS:");
+    Serial.println("  q  Stop TX        p=cycle power  h/?=this menu");
+    Serial.println();
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -106,36 +132,7 @@ void setup() {
 
     // --- Ready ---
     Serial.println();
-    Serial.println("JAMMER-RF ready.");
-    Serial.println("Press BOOT button to navigate.");
-    Serial.println("  SHORT press = cycle menu");
-    Serial.println("  LONG  press = select/confirm");
-    Serial.println();
-    Serial.println("Serial commands:");
-    Serial.println("  c = CW tone mode");
-    Serial.println("  e = ELRS 200Hz FCC915 (default)");
-    Serial.println("  e1-e6 = ELRS rate (200/100/50/25/D250/D500)");
-    Serial.println("  e1f/a/u/i = ELRS domain (FCC/AU/EU/IN)");
-    Serial.println("  e1fb = ELRS binding→connected sequence");
-    Serial.println("  k = SiK Radio GFSK 64kbps (default)");
-    Serial.println("  k1-k3 = SiK speed (64/125/250 kbps)");
-    Serial.println("  l = mLRS 19Hz LoRa (default)");
-    Serial.println("  l1-l3 = mLRS mode (19Hz/31Hz/50Hz-FSK)");
-    Serial.println("  u = Custom LoRa (start TX)");
-    Serial.println("  u? = show settings  uf/us/ub/ur/uh/up/uw = configure");
-    Serial.println("  f1 = Meshtastic beacon (sync 0x2B, 16sym)");
-    Serial.println("  f2 = Helium PoC (5 hotspots, SB2)");
-    Serial.println("  f3 = LoRaWAN EU868 (868.1/868.3/868.5)");
-    Serial.println("  b = Band sweep mode");
-    Serial.println("  r = RID spoofer (WiFi+BLE)");
-    Serial.println("  m = Mixed false positive (LoRaWAN+ELRS)");
-    Serial.println("  x = Combined (RID + ELRS dual-core)");
-    Serial.println("  w = Drone swarm simulator");
-    Serial.println("  p = cycle TX power");
-    Serial.println("  d = cycle dwell time (sweep)");
-    Serial.println("  s = cycle step size (sweep)");
-    Serial.println("  n = cycle swarm drone count (1/4/8/16)");
-    Serial.println("  q = stop TX and return to menu");
+    printHelp();
 
     digitalWrite(LED_PIN, LOW);
 }
@@ -376,9 +373,14 @@ static void handleSerialCommands() {
         swarmCycleCount();
         break;
 
+    case 'h':
+    case '?':
+        printHelp();
+        break;
+
     default:
         if (cmd > ' ') {
-            Serial.printf("Unknown command: '%c'. Use c/e/b/r/m/x/w/n/p/q.\n", cmd);
+            Serial.printf("Unknown command: '%c'. Type 'h' for help.\n", cmd);
         }
         break;
     }
