@@ -11,6 +11,7 @@
 #include "sik_radio.h"
 #include "mlrs_sim.h"
 #include "custom_lora.h"
+#include "infra_sim.h"
 
 // ============================================================
 // Menu state machine + button debouncer
@@ -807,6 +808,46 @@ void menuUpdate() {
                 _oled->display();
 
                 lastClRefresh = millis();
+                _needsRedraw = false;
+            }
+        }
+        break;
+
+    // --- Infrastructure Sim Active ---
+    case STATE_INFRA_ACTIVE:
+        infraUpdate();
+
+        if (btn == BTN_LONG) {
+            infraStop();
+            _state = STATE_MAIN_MENU;
+            _needsRedraw = true;
+        }
+        {
+            static unsigned long lastInfraRefresh = 0;
+            if (_needsRedraw || (millis() - lastInfraRefresh > 500)) {
+                _oled->clearDisplay();
+                _oled->setTextSize(1);
+                _oled->setTextColor(SSD1306_WHITE);
+
+                InfraParams ip = infraGetParams();
+                const char* modeNames[] = { "MESHTASTIC", "HELIUM PoC", "LoRaWAN EU" };
+                _oled->setCursor(0, 0);
+                _oled->printf("%s - FP", modeNames[ip.mode]);
+                _oled->drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
+
+                _oled->setCursor(0, 14);
+                _oled->printf("Freq: %.1f MHz", ip.lastFreqMHz);
+                _oled->setCursor(0, 24);
+                _oled->printf("SF%u  Pkts: %lu", ip.lastSF, (unsigned long)ip.packetCount);
+                _oled->setCursor(0, 34);
+                _oled->printf("Elapsed: %lu sec", (unsigned long)ip.elapsedSec);
+                _oled->setCursor(0, 44);
+                _oled->printf("Pwr: %d dBm", ip.powerDbm);
+                _oled->setCursor(0, 56);
+                _oled->print("LONG=stop");
+                _oled->display();
+
+                lastInfraRefresh = millis();
                 _needsRedraw = false;
             }
         }

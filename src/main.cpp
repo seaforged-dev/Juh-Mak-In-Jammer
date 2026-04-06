@@ -16,6 +16,7 @@
 #include "sik_radio.h"
 #include "mlrs_sim.h"
 #include "custom_lora.h"
+#include "infra_sim.h"
 #include "protocol_params.h"
 #include "splash.h"
 
@@ -97,6 +98,7 @@ void setup() {
     sikInit(&radio);
     mlrsInit(&radio);
     customLoraInit(&radio);
+    infraInit(&radio);
     menuInit(&display);
 
     // Hold boot screen for 2 seconds so user can read it
@@ -121,6 +123,9 @@ void setup() {
     Serial.println("  l1-l3 = mLRS mode (19Hz/31Hz/50Hz-FSK)");
     Serial.println("  u = Custom LoRa (start TX)");
     Serial.println("  u? = show settings  uf/us/ub/ur/uh/up/uw = configure");
+    Serial.println("  f1 = Meshtastic beacon (sync 0x2B, 16sym)");
+    Serial.println("  f2 = Helium PoC (5 hotspots, SB2)");
+    Serial.println("  f3 = LoRaWAN EU868 (868.1/868.3/868.5)");
     Serial.println("  b = Band sweep mode");
     Serial.println("  r = RID spoofer (WiFi+BLE)");
     Serial.println("  m = Mixed false positive (LoRaWAN+ELRS)");
@@ -150,6 +155,7 @@ static void stopCurrentMode() {
     if (st == STATE_SIK_ACTIVE)      sikStop();
     if (st == STATE_MLRS_ACTIVE)     mlrsStop();
     if (st == STATE_CUSTOM_LORA_ACTIVE) customLoraStop();
+    if (st == STATE_INFRA_ACTIVE)    infraStop();
 }
 
 // --- Serial command parser ---
@@ -277,6 +283,26 @@ static void handleSerialCommands() {
         break;
     }
 
+    case 'f': { // Infrastructure false positive modes — f1/f2/f3
+        delay(50);
+        if (Serial.available()) {
+            char c = Serial.read();
+            stopCurrentMode();
+            switch (c) {
+            case '1': infraStart(INFRA_MESHTASTIC); break;
+            case '2': infraStart(INFRA_HELIUM_POC); break;
+            case '3': infraStart(INFRA_LORAWAN_EU); break;
+            default:
+                Serial.println("f1=Meshtastic f2=Helium f3=LoRaWAN-EU868");
+                break;
+            }
+            if (c >= '1' && c <= '3') menuSetState(STATE_INFRA_ACTIVE);
+        } else {
+            Serial.println("f1=Meshtastic f2=Helium f3=LoRaWAN-EU868");
+        }
+        break;
+    }
+
     case 'u': { // Custom LoRa — u=start, u?=show, uXvalue=configure
         delay(80);
         if (!Serial.available()) {
@@ -377,7 +403,8 @@ void loop() {
                      || st == STATE_RAMP_ACTIVE
                      || st == STATE_SIK_ACTIVE
                      || st == STATE_MLRS_ACTIVE
-                     || st == STATE_CUSTOM_LORA_ACTIVE);
+                     || st == STATE_CUSTOM_LORA_ACTIVE
+                     || st == STATE_INFRA_ACTIVE);
     unsigned long blinkRate = txActive ? 200 : 1000;
 
     if (millis() - lastBlink >= blinkRate) {
