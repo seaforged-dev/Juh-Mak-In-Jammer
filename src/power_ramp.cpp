@@ -7,12 +7,14 @@
 
 static SX1262 *_radio = nullptr;
 
-// ELRS parameters (same as rf_modes.cpp ELRS)
-static constexpr uint8_t  ELRS_NUM_CHANNELS    = 80;
-static constexpr float    ELRS_BAND_START      = 902.0f;
-static constexpr float    ELRS_BAND_END        = 928.0f;
-static constexpr float    ELRS_CHAN_SPACING     = (ELRS_BAND_END - ELRS_BAND_START) / ELRS_NUM_CHANNELS;
-static constexpr uint32_t ELRS_HOP_INTERVAL_US = 5000;
+// ELRS FCC915 parameters (matches rf_modes.cpp)
+static constexpr uint8_t  ELRS_NUM_CHANNELS     = 40;
+static constexpr float    ELRS_BAND_START       = 903.5f;
+static constexpr float    ELRS_BAND_END         = 926.9f;
+static constexpr float    ELRS_CHAN_SPACING      = (ELRS_BAND_END - ELRS_BAND_START) / ELRS_NUM_CHANNELS;
+static constexpr uint32_t ELRS_PACKET_INTERVAL_US = 5000;
+static constexpr uint8_t  ELRS_HOP_EVERY_N      = 4;
+static constexpr uint8_t  ELRS_SYNC_CHANNEL     = 20;
 
 static uint8_t _hopSeq[ELRS_NUM_CHANNELS];
 static uint8_t _hopIdx = 0;
@@ -25,6 +27,7 @@ static constexpr uint32_t HOLD_AT_MAX_SEC = 10;
 static bool     _running       = false;
 static uint32_t _packetCount   = 0;
 static uint32_t _hopCount      = 0;
+static uint8_t  _pktsSinceHop  = 0;
 static float    _currentMHz    = ELRS_BAND_START;
 static int8_t   _currentPwr    = PWR_MIN;
 static bool     _ascending     = true;
@@ -51,6 +54,7 @@ static void buildHopSequence() {
         _hopSeq[i] = _hopSeq[j];
         _hopSeq[j] = tmp;
     }
+    _hopSeq[0] = ELRS_SYNC_CHANNEL;
 }
 
 static float chanToFreq(uint8_t chan) {
@@ -69,6 +73,7 @@ void powerRampStart() {
     _hopIdx = 0;
     _packetCount = 0;
     _hopCount = 0;
+    _pktsSinceHop = 0;
     _currentPwr = PWR_MIN;
     _ascending = true;
 
@@ -119,16 +124,31 @@ void powerRampUpdate() {
     unsigned long nowUs = micros();
     unsigned long nowMs = millis();
 
-    // FHSS hopping at 200 Hz
-    if ((nowUs - _lastHopUs) >= ELRS_HOP_INTERVAL_US) {
+    // FHSS packets at 200 Hz, hop every 4 packets
+    if ((nowUs - _lastHopUs) >= ELRS_PACKET_INTERVAL_US) {
         _lastHopUs = nowUs;
-        _hopIdx = (_hopIdx + 1) % ELRS_NUM_CHANNELS;
-        _hopCount++;
 
-        _currentMHz = chanToFreq(_hopSeq[_hopIdx]);
-        _radio->setFrequency(_currentMHz);
+        // Hop every 4 packets
+        if (_pktsSinceHop >= ELRS_HOP_EVERY_N) {
+            _pktsSinceHop = 0;
+            _hopIdx = (_hopIdx + 1) % ELRS_NUM_CHANNELS;
+            _hopCount++;
+
+            // Sync channel every freq_count hops
+            uint8_t nextChan;
+            if ((_hopCount % ELRS_NUM_CHANNELS) == 0) {
+                nextChan = ELRS_SYNC_CHANNEL;
+            } else {
+                nextChan = _hopSeq[_hopIdx];
+            }
+
+            _currentMHz = chanToFreq(nextChan);
+            _radio->setFrequency(_currentMHz);
+        }
+
         _radio->transmit(RAMP_PAYLOAD, sizeof(RAMP_PAYLOAD));
         _packetCount++;
+        _pktsSinceHop++;
     }
 
     // Update power every 500ms

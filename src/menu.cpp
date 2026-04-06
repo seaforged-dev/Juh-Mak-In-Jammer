@@ -207,7 +207,7 @@ static void drawElrsActive() {
     ElrsParams e = elrsGetParams();
 
     _oled->setCursor(0, 14);
-    _oled->printf("Ch:%u/80 %.1f MHz", e.channelIndex, e.currentMHz);
+    _oled->printf("Ch:%u/40 %.1f MHz", e.channelIndex, e.currentMHz);
     _oled->setCursor(0, 24);
     _oled->printf("Pkts: %lu", (unsigned long)e.packetCount);
     _oled->setCursor(0, 34);

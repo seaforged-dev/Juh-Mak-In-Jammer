@@ -144,16 +144,20 @@ static void ismBurstTransmit() {
 static bool _mixedElrsConfigured = false;
 static unsigned long _mixedLoraNextMs = 0;
 
-// ELRS channel table (same as rf_modes.cpp — shared constants)
-static constexpr uint8_t  MIX_ELRS_CHANNELS = 80;
-static constexpr float    MIX_ELRS_START     = 902.0f;
-static constexpr float    MIX_ELRS_END       = 928.0f;
+// ELRS FCC915 channel table (matches rf_modes.cpp)
+static constexpr uint8_t  MIX_ELRS_CHANNELS = 40;
+static constexpr float    MIX_ELRS_START     = 903.5f;
+static constexpr float    MIX_ELRS_END       = 926.9f;
 static constexpr float    MIX_ELRS_SPACING   = (MIX_ELRS_END - MIX_ELRS_START) / MIX_ELRS_CHANNELS;
-static constexpr uint32_t MIX_HOP_US         = 5000;  // 200 Hz
+static constexpr uint32_t MIX_PKT_US         = 5000;  // 200 Hz packet rate
+static constexpr uint8_t  MIX_HOP_EVERY_N    = 4;     // hop every 4 packets
+static constexpr uint8_t  MIX_SYNC_CHANNEL   = 20;    // midpoint sync channel
 
 static uint8_t  _mixHopSeq[MIX_ELRS_CHANNELS];
 static uint8_t  _mixHopIdx = 0;
-static unsigned long _mixLastHopUs = 0;
+static uint8_t  _mixPktsSinceHop = 0;
+static uint32_t _mixHopCount = 0;
+static unsigned long _mixLastPktUs = 0;
 static const uint8_t MIX_ELRS_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 static void mixBuildHopSequence() {
@@ -166,6 +170,7 @@ static void mixBuildHopSequence() {
         _mixHopSeq[i] = _mixHopSeq[j];
         _mixHopSeq[j] = tmp;
     }
+    _mixHopSeq[0] = MIX_SYNC_CHANNEL;
 }
 
 static void mixConfigElrs() {
@@ -178,13 +183,29 @@ static void mixConfigElrs() {
     _mixedElrsConfigured = true;
 }
 
-static void mixElrsHop() {
-    _mixHopIdx = (_mixHopIdx + 1) % MIX_ELRS_CHANNELS;
-    float freq = MIX_ELRS_START + (_mixHopSeq[_mixHopIdx] * MIX_ELRS_SPACING);
-    _lastFreq = freq;
-    _radio->setFrequency(freq);
+static void mixElrsTx() {
+    // Hop every 4 packets
+    if (_mixPktsSinceHop >= MIX_HOP_EVERY_N) {
+        _mixPktsSinceHop = 0;
+        _mixHopIdx = (_mixHopIdx + 1) % MIX_ELRS_CHANNELS;
+        _mixHopCount++;
+
+        // Sync channel every freq_count hops
+        uint8_t nextChan;
+        if ((_mixHopCount % MIX_ELRS_CHANNELS) == 0) {
+            nextChan = MIX_SYNC_CHANNEL;
+        } else {
+            nextChan = _mixHopSeq[_mixHopIdx];
+        }
+
+        float freq = MIX_ELRS_START + (nextChan * MIX_ELRS_SPACING);
+        _lastFreq = freq;
+        _radio->setFrequency(freq);
+    }
+
     _radio->transmit(MIX_ELRS_PAYLOAD, sizeof(MIX_ELRS_PAYLOAD));
     _mixedElrsCount++;
+    _mixPktsSinceHop++;
 }
 
 static void mixLorawanBurst() {
@@ -231,12 +252,14 @@ void fpStart(FpMode mode) {
     case FP_MIXED:
         mixBuildHopSequence();
         _mixHopIdx = 0;
+        _mixPktsSinceHop = 0;
+        _mixHopCount = 0;
         _mixedLoraNextMs = millis() + rngRange(15000, 30000);
         mixConfigElrs();
-        _mixLastHopUs = micros();
+        _mixLastPktUs = micros();
         // Transmit first ELRS packet
-        mixElrsHop();
-        Serial.println("FP: Mixed mode started (ELRS + LoRaWAN)");
+        mixElrsTx();
+        Serial.println("FP: Mixed mode started (ELRS 40ch + LoRaWAN)");
         break;
 
     default:
@@ -283,14 +306,15 @@ void fpUpdate() {
         // LoRaWAN burst interrupt (every 30-60s)
         if (nowMs >= _mixedLoraNextMs) {
             mixLorawanBurst();
-            _mixLastHopUs = micros();
+            _mixLastPktUs = micros();
+            _mixPktsSinceHop = 0;  // reset after radio reconfig
         }
 
-        // ELRS FHSS hops at 200 Hz
+        // ELRS packets at 200 Hz (hop every 4)
         unsigned long nowUs = micros();
-        if ((nowUs - _mixLastHopUs) >= MIX_HOP_US) {
-            _mixLastHopUs = nowUs;
-            mixElrsHop();
+        if ((nowUs - _mixLastPktUs) >= MIX_PKT_US) {
+            _mixLastPktUs = nowUs;
+            mixElrsTx();
         }
         break;
     }

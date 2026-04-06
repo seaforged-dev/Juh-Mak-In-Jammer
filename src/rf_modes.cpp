@@ -242,16 +242,19 @@ int8_t rfGetPower() {
 }
 
 // ============================================================
-// ELRS 915 MHz FHSS Simulation
+// ELRS 915 MHz FHSS Simulation — FCC915 Domain
 // ============================================================
-// Real ELRS 200Hz mode: LoRa SF6 BW500, 80 channels across
-// 902–928 MHz, pseudo-random hop sequence, 5 ms per channel.
+// Real ELRS FCC915: LoRa SF6 BW500, 40 channels across
+// 903.5–926.9 MHz, LCG-seeded Fisher-Yates hop sequence,
+// hop every 4 packets, sync channel at midpoint (ch 20).
 
-static constexpr uint8_t  ELRS_NUM_CHANNELS = 80;
-static constexpr float    ELRS_BAND_START   = 902.0f;  // MHz
-static constexpr float    ELRS_BAND_END     = 928.0f;  // MHz
+static constexpr uint8_t  ELRS_NUM_CHANNELS = 40;
+static constexpr float    ELRS_BAND_START   = 903.5f;  // MHz (FCC915 start)
+static constexpr float    ELRS_BAND_END     = 926.9f;  // MHz (FCC915 end)
 static constexpr float    ELRS_CHAN_SPACING  = (ELRS_BAND_END - ELRS_BAND_START) / ELRS_NUM_CHANNELS;
-static constexpr uint32_t ELRS_HOP_INTERVAL_US = 5000;  // 5 ms = 200 Hz hop rate
+static constexpr uint32_t ELRS_PACKET_INTERVAL_US = 5000;  // 5 ms = 200 Hz packet rate
+static constexpr uint8_t  ELRS_HOP_EVERY_N  = 4;           // hop every 4 packets (real ELRS)
+static constexpr uint8_t  ELRS_SYNC_CHANNEL = 20;          // midpoint sync channel
 
 // FHSS sequence — pseudo-random permutation of 0..79
 // Generated once at start via seeded Fisher-Yates shuffle
@@ -261,14 +264,17 @@ static uint8_t _elrsHopIdx = 0;
 static bool     _elrsRunning    = false;
 static uint32_t _elrsPacketCount = 0;
 static uint32_t _elrsHopCount   = 0;
+static uint8_t  _elrsPktsSinceHop = 0;  // counts 0..3 then hops
 static float    _elrsCurrentMHz = ELRS_BAND_START;
-static unsigned long _elrsLastHopUs = 0;
+static unsigned long _elrsLastPktUs = 0;
 
 // 8-byte dummy payload matching real ELRS packet size
 static const uint8_t ELRS_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 // Build a pseudo-random hop sequence using Fisher-Yates shuffle.
-// Seed can be changed to simulate different ELRS binding UIDs.
+// Every freq_count hops, the sync channel (ch 20) is inserted,
+// matching real ELRS behavior where FHSSsequence[i] = syncChannel
+// when (i % freq_count == 0).
 static void elrsBuildHopSequence(uint32_t seed) {
     // Start with sequential channel indices
     for (uint8_t i = 0; i < ELRS_NUM_CHANNELS; i++) {
@@ -284,6 +290,9 @@ static void elrsBuildHopSequence(uint32_t seed) {
         _elrsHopSeq[i] = _elrsHopSeq[j];
         _elrsHopSeq[j] = tmp;
     }
+
+    // Insert sync channel at position 0 (visited every freq_count hops)
+    _elrsHopSeq[0] = ELRS_SYNC_CHANNEL;
 }
 
 static float elrsChanToFreq(uint8_t chan) {
@@ -298,6 +307,7 @@ void elrsStart() {
     _elrsHopIdx = 0;
     _elrsPacketCount = 0;
     _elrsHopCount = 0;
+    _elrsPktsSinceHop = 0;
 
     // Full reset ensures clean state when switching from CW/sweep modes
     _radio->reset();
@@ -329,13 +339,14 @@ void elrsStart() {
 
     _elrsCurrentMHz = elrsChanToFreq(_elrsHopSeq[0]);
     _elrsRunning = true;
-    _elrsLastHopUs = micros();
+    _elrsLastPktUs = micros();
 
     // Transmit first packet immediately (non-blocking)
     _radio->startTransmit(ELRS_PAYLOAD, sizeof(ELRS_PAYLOAD));
     _elrsPacketCount++;
+    _elrsPktsSinceHop = 1;
 
-    Serial.printf("ELRS TX ON: SF6 BW500, 80ch FHSS, 200Hz, %d dBm\n", _powerDbm);
+    Serial.printf("[ELRS] 40 channels, 903.5-926.9 MHz, hop every 4 packets, sync ch=20, %d dBm\n", _powerDbm);
 }
 
 void elrsStop() {
@@ -343,33 +354,46 @@ void elrsStop() {
 
     _radio->standby();
     _elrsRunning = false;
-    Serial.printf("ELRS TX OFF: %lu packets, %lu hops\n",
+    Serial.printf("[ELRS] TX OFF: %lu packets, %lu hops (%.1f pkts/hop avg)\n",
                   (unsigned long)_elrsPacketCount,
-                  (unsigned long)_elrsHopCount);
+                  (unsigned long)_elrsHopCount,
+                  _elrsHopCount > 0 ? (float)_elrsPacketCount / _elrsHopCount : 0);
 }
 
 void elrsUpdate() {
     if (!_elrsRunning || !_radio) return;
 
     unsigned long nowUs = micros();
-    if ((nowUs - _elrsLastHopUs) < ELRS_HOP_INTERVAL_US) return;
+    if ((nowUs - _elrsLastPktUs) < ELRS_PACKET_INTERVAL_US) return;
 
-    _elrsLastHopUs += ELRS_HOP_INTERVAL_US;  // accumulate to prevent drift
+    _elrsLastPktUs += ELRS_PACKET_INTERVAL_US;  // accumulate to prevent drift
 
-    // Advance to next channel in the hop sequence
-    _elrsHopIdx = (_elrsHopIdx + 1) % ELRS_NUM_CHANNELS;
-    _elrsHopCount++;
+    // Hop every 4 packets (real ELRS behavior)
+    if (_elrsPktsSinceHop >= ELRS_HOP_EVERY_N) {
+        _elrsPktsSinceHop = 0;
+        _elrsHopIdx = (_elrsHopIdx + 1) % ELRS_NUM_CHANNELS;
+        _elrsHopCount++;
 
-    float nextFreq = elrsChanToFreq(_elrsHopSeq[_elrsHopIdx]);
-    _elrsCurrentMHz = nextFreq;
+        // Sync channel: every freq_count hops, force to channel 20
+        uint8_t nextChan;
+        if ((_elrsHopCount % ELRS_NUM_CHANNELS) == 0) {
+            nextChan = ELRS_SYNC_CHANNEL;
+        } else {
+            nextChan = _elrsHopSeq[_elrsHopIdx];
+        }
 
-    // Hop: retune and transmit. startTransmit blocks ~6.7ms (SX1262 BUSY
-    // stays high for full TX airtime at SF6/BW500). This limits max hop rate
-    // to ~149 Hz — a hardware/physics constraint, not a software one.
-    _radio->standby();
-    _radio->setFrequency(nextFreq);
+        float nextFreq = elrsChanToFreq(nextChan);
+        _elrsCurrentMHz = nextFreq;
+
+        // Retune to new channel
+        _radio->standby();
+        _radio->setFrequency(nextFreq);
+    }
+
+    // Transmit packet (may be same freq as previous if within 4-packet dwell)
     _radio->startTransmit(ELRS_PAYLOAD, sizeof(ELRS_PAYLOAD));
     _elrsPacketCount++;
+    _elrsPktsSinceHop++;
 }
 
 ElrsParams elrsGetParams() {

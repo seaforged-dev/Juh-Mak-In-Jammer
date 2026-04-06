@@ -24,12 +24,14 @@ static volatile bool _elrsTaskRunning = false;
 static volatile uint32_t _elrsTaskPkts = 0;
 static volatile uint32_t _elrsTaskHops = 0;
 
-// ELRS channel table (same as rf_modes.cpp)
-static constexpr uint8_t  CMB_ELRS_CHANNELS = 80;
-static constexpr float    CMB_ELRS_START    = 902.0f;
-static constexpr float    CMB_ELRS_END      = 928.0f;
+// ELRS FCC915 channel table (matches rf_modes.cpp)
+static constexpr uint8_t  CMB_ELRS_CHANNELS = 40;
+static constexpr float    CMB_ELRS_START    = 903.5f;
+static constexpr float    CMB_ELRS_END      = 926.9f;
 static constexpr float    CMB_ELRS_SPACING  = (CMB_ELRS_END - CMB_ELRS_START) / CMB_ELRS_CHANNELS;
-static constexpr uint32_t CMB_HOP_US        = 5000;
+static constexpr uint32_t CMB_PKT_US        = 5000;   // 200 Hz packet rate
+static constexpr uint8_t  CMB_HOP_EVERY_N   = 4;      // hop every 4 packets
+static constexpr uint8_t  CMB_SYNC_CHANNEL  = 20;     // midpoint sync channel
 
 static uint8_t _cmbHopSeq[CMB_ELRS_CHANNELS];
 static const uint8_t CMB_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
@@ -44,12 +46,15 @@ static void cmbBuildHopSequence() {
         _cmbHopSeq[i] = _cmbHopSeq[j];
         _cmbHopSeq[j] = tmp;
     }
+    _cmbHopSeq[0] = CMB_SYNC_CHANNEL;
 }
 
 // FreeRTOS task running ELRS FHSS on Core 1
 static void elrsTask(void *param) {
     SX1262 *radio = (SX1262 *)param;
     uint8_t hopIdx = 0;
+    uint8_t pktsSinceHop = 0;
+    uint32_t hopCount = 0;
 
     // Configure radio for ELRS mode
     radio->standby();
@@ -59,20 +64,35 @@ static void elrsTask(void *param) {
                  rfGetPower(), 8, 1.8, false);
     radio->explicitHeader();
 
-    unsigned long lastHopUs = micros();
+    unsigned long lastPktUs = micros();
 
     while (_elrsTaskRunning) {
         unsigned long nowUs = micros();
-        if ((nowUs - lastHopUs) >= CMB_HOP_US) {
-            lastHopUs = nowUs;
+        if ((nowUs - lastPktUs) >= CMB_PKT_US) {
+            lastPktUs = nowUs;
 
-            hopIdx = (hopIdx + 1) % CMB_ELRS_CHANNELS;
-            freq = CMB_ELRS_START + (_cmbHopSeq[hopIdx] * CMB_ELRS_SPACING);
-            radio->setFrequency(freq);
+            // Hop every 4 packets
+            if (pktsSinceHop >= CMB_HOP_EVERY_N) {
+                pktsSinceHop = 0;
+                hopIdx = (hopIdx + 1) % CMB_ELRS_CHANNELS;
+                hopCount++;
+                _elrsTaskHops++;
+
+                // Sync channel every freq_count hops
+                uint8_t nextChan;
+                if ((hopCount % CMB_ELRS_CHANNELS) == 0) {
+                    nextChan = CMB_SYNC_CHANNEL;
+                } else {
+                    nextChan = _cmbHopSeq[hopIdx];
+                }
+
+                freq = CMB_ELRS_START + (nextChan * CMB_ELRS_SPACING);
+                radio->setFrequency(freq);
+            }
+
             radio->transmit(CMB_PAYLOAD, sizeof(CMB_PAYLOAD));
-
             _elrsTaskPkts++;
-            _elrsTaskHops++;
+            pktsSinceHop++;
         }
 
         // Yield briefly to prevent watchdog trigger
