@@ -29,21 +29,29 @@ static volatile uint32_t _elrsTaskHops = 0;
 static const ElrsDomain&  _cmbDom  = ELRS_DOMAINS[ELRS_DOMAIN_FCC915];
 static const ElrsAirRate& _cmbRate = ELRS_AIR_RATES[ELRS_RATE_200HZ];
 
+// Sequence holds non-sync channels only; sync is interleaved at runtime.
 static uint8_t _cmbHopSeq[80];  // sized for largest domain
+static uint8_t _cmbSeqLen = 0;  // = numCh - 1 after build
 static const uint8_t CMB_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 static void cmbBuildHopSequence() {
-    uint8_t numCh = _cmbDom.channels;
-    for (uint8_t i = 0; i < numCh; i++) _cmbHopSeq[i] = i;
+    uint8_t numCh  = _cmbDom.channels;
+    uint8_t syncCh = _cmbDom.syncChannel;
+
+    uint8_t cnt = 0;
+    for (uint8_t i = 0; i < numCh; i++) {
+        if (i != syncCh) _cmbHopSeq[cnt++] = i;
+    }
+    _cmbSeqLen = cnt;
+
     uint32_t rng = 0xFEEDFACE;
-    for (uint8_t i = numCh - 1; i > 0; i--) {
+    for (uint8_t i = cnt - 1; i > 0; i--) {
         rng = rng * ELRS_LCG_MULTIPLIER + ELRS_LCG_INCREMENT;
         uint8_t j = (rng >> 16) % (i + 1);
         uint8_t tmp = _cmbHopSeq[i];
         _cmbHopSeq[i] = _cmbHopSeq[j];
         _cmbHopSeq[j] = tmp;
     }
-    _cmbHopSeq[0] = _cmbDom.syncChannel;
 }
 
 // FreeRTOS task running ELRS FHSS on Core 1
@@ -76,12 +84,16 @@ static void elrsTask(void *param) {
 
             if (pktsSinceHop >= hopEvery) {
                 pktsSinceHop = 0;
-                hopIdx = (hopIdx + 1) % numCh;
                 hopCount++;
                 _elrsTaskHops++;
 
-                uint8_t nextChan = ((hopCount % numCh) == 0)
-                    ? _cmbDom.syncChannel : _cmbHopSeq[hopIdx];
+                uint8_t nextChan;
+                if ((hopCount % numCh) == 0) {
+                    nextChan = _cmbDom.syncChannel;
+                } else {
+                    hopIdx = (uint8_t)((hopIdx + 1) % _cmbSeqLen);
+                    nextChan = _cmbHopSeq[hopIdx];
+                }
                 freq = elrsChanFreq(_cmbDom, nextChan);
                 radio->setFrequency(freq);
             }

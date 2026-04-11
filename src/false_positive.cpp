@@ -153,7 +153,9 @@ static unsigned long _mixedLoraNextMs = 0;
 static const ElrsDomain&  _mixDom  = ELRS_DOMAINS[ELRS_DOMAIN_FCC915];
 static const ElrsAirRate& _mixRate = ELRS_AIR_RATES[ELRS_RATE_200HZ];
 
+// Sequence holds non-sync channels only; sync is interleaved at runtime.
 static uint8_t  _mixHopSeq[80];  // sized for largest domain
+static uint8_t  _mixSeqLen = 0;  // = numCh - 1 after build
 static uint8_t  _mixHopIdx = 0;
 static uint8_t  _mixPktsSinceHop = 0;
 static uint32_t _mixHopCount = 0;
@@ -161,17 +163,23 @@ static unsigned long _mixLastPktUs = 0;
 static const uint8_t MIX_ELRS_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 static void mixBuildHopSequence() {
-    uint8_t numCh = _mixDom.channels;
-    for (uint8_t i = 0; i < numCh; i++) _mixHopSeq[i] = i;
+    uint8_t numCh  = _mixDom.channels;
+    uint8_t syncCh = _mixDom.syncChannel;
+
+    uint8_t cnt = 0;
+    for (uint8_t i = 0; i < numCh; i++) {
+        if (i != syncCh) _mixHopSeq[cnt++] = i;
+    }
+    _mixSeqLen = cnt;
+
     uint32_t rng = 0xCAFEBABE;
-    for (uint8_t i = numCh - 1; i > 0; i--) {
+    for (uint8_t i = cnt - 1; i > 0; i--) {
         rng = rng * ELRS_LCG_MULTIPLIER + ELRS_LCG_INCREMENT;
         uint8_t j = (rng >> 16) % (i + 1);
         uint8_t tmp = _mixHopSeq[i];
         _mixHopSeq[i] = _mixHopSeq[j];
         _mixHopSeq[j] = tmp;
     }
-    _mixHopSeq[0] = _mixDom.syncChannel;
 }
 
 static void mixConfigElrs() {
@@ -194,11 +202,15 @@ static void mixElrsTx() {
 
     if (_mixPktsSinceHop >= hopEvery) {
         _mixPktsSinceHop = 0;
-        _mixHopIdx = (_mixHopIdx + 1) % numCh;
         _mixHopCount++;
 
-        uint8_t nextChan = ((_mixHopCount % numCh) == 0)
-            ? _mixDom.syncChannel : _mixHopSeq[_mixHopIdx];
+        uint8_t nextChan;
+        if ((_mixHopCount % numCh) == 0) {
+            nextChan = _mixDom.syncChannel;
+        } else {
+            _mixHopIdx = (uint8_t)((_mixHopIdx + 1) % _mixSeqLen);
+            nextChan = _mixHopSeq[_mixHopIdx];
+        }
 
         float freq = elrsChanFreq(_mixDom, nextChan);
         _lastFreq = freq;

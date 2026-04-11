@@ -191,10 +191,22 @@ static size_t buildSwarmBeacon(const VirtualDrone& d) {
     msg = &_beaconFrame[pos];
     memset(msg, 0, ODID_MSG_SIZE);
     msg[0] = ODID_MSG_TYPE_LOCATION | ODID_PROTO_VERSION;
-    msg[1] = 0x20;  // airborne
-    msg[2] = (uint8_t)(d.heading / 360.0f * 255.0f);
+
+    // Byte 1: Status=2 (Airborne) plus E/W Direction Segment bit if heading
+    // is in the western half. Byte 2 carries 0-179 degrees (see ASTM
+    // F3411-22a §A.5.2); previous code scaled 0-360 to 0-255 linearly
+    // which does not match any ODID decoder's expected format.
+    float h = fmodf(d.heading, 360.0f);
+    if (h < 0) h += 360.0f;
+    bool ewBit = (h >= 180.0f);
+    if (ewBit) h -= 180.0f;
+    msg[1] = 0x20 | (ewBit ? 0x02 : 0x00);
+    msg[2] = (uint8_t)h;
+
     msg[3] = encodeSpeed(d.speed);
-    msg[4] = 63;  // vspeed = 0
+    // Byte 4: vertical speed — signed int8 in 0.5 m/s units, no offset.
+    // Swarm drones don't currently track vspeed, so hover at 0 m/s.
+    msg[4] = 0;
     int32_t lat = encodeLatLon(d.lat);
     memcpy(&msg[5], &lat, 4);
     int32_t lon = encodeLatLon(d.lon);

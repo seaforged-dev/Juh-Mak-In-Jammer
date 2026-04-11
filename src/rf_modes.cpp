@@ -251,9 +251,15 @@ int8_t rfGetPower() {
 static const ElrsDomain*  _elrsDomain  = &ELRS_DOMAINS[ELRS_DOMAIN_FCC915];
 static const ElrsAirRate* _elrsRate    = &ELRS_AIR_RATES[ELRS_RATE_200HZ];
 
-// FHSS sequence — pseudo-random permutation generated via LCG Fisher-Yates
-static uint8_t _elrsHopSeq[80];  // sized for largest domain (ISM2G4=80)
+// FHSS sequence — pseudo-random permutation of the NON-sync channels.
+// The sync channel is interleaved by the runtime every numCh hops; it is
+// deliberately excluded from the shuffled array to avoid the duplication
+// bug where an explicit slot-0 overwrite created two sync entries and
+// dropped one ordinary channel.
+static uint8_t _elrsHopSeq[80];      // sized for largest domain (ISM2G4=80)
+static uint8_t _elrsSeqLen = 0;      // actual filled length (numCh - 1)
 static uint8_t _elrsHopIdx = 0;
+static uint8_t _elrsCurrentChannel = 0;  // channel actually on-air (for OLED)
 
 static bool     _elrsRunning    = false;
 static uint32_t _elrsPacketCount = 0;
@@ -290,27 +296,35 @@ static uint8_t elrsEffectiveHopInterval() {
     return _elrsRate->isDvda ? _elrsRate->hopInterval : _elrsDomain->hopInterval;
 }
 
-// Build pseudo-random hop sequence using LCG-seeded Fisher-Yates shuffle.
-// Uses real ELRS LCG constants (0x343FD / 0x269EC3) from protocol_params.h.
-// Sync channel inserted at position 0, visited every freq_count hops.
+// Build pseudo-random hop sequence over the NON-sync channels using an
+// LCG-seeded Fisher-Yates shuffle with the real ELRS constants
+// (0x343FD / 0x269EC3). The sync channel is NOT in this array; the
+// runtime forces it every numCh hops per v2 §3.1.6. Sequence length is
+// numCh - 1. This replaces the earlier scheme where the full channel
+// set was shuffled and slot 0 was then overwritten with the sync
+// channel, which left the sync channel duplicated and dropped one
+// ordinary channel from the rotation.
 static void elrsBuildHopSequence(uint32_t seed) {
-    uint8_t numCh = _elrsDomain->channels;
-    for (uint8_t i = 0; i < numCh; i++) {
-        _elrsHopSeq[i] = i;
-    }
+    uint8_t numCh  = _elrsDomain->channels;
+    uint8_t syncCh = _elrsDomain->syncChannel;
 
-    // Fisher-Yates shuffle with real ELRS LCG constants — v2 §3.1.6
+    uint8_t cnt = 0;
+    for (uint8_t i = 0; i < numCh; i++) {
+        if (i != syncCh) {
+            _elrsHopSeq[cnt++] = i;
+        }
+    }
+    _elrsSeqLen = cnt;  // = numCh - 1
+
+    // Fisher-Yates over the non-sync entries only.
     uint32_t rng = seed;
-    for (uint8_t i = numCh - 1; i > 0; i--) {
+    for (uint8_t i = cnt - 1; i > 0; i--) {
         rng = rng * ELRS_LCG_MULTIPLIER + ELRS_LCG_INCREMENT;
-        uint8_t j = (rng >> 16) % (i + 1);  // use upper bits for better distribution
+        uint8_t j = (rng >> 16) % (i + 1);
         uint8_t tmp = _elrsHopSeq[i];
         _elrsHopSeq[i] = _elrsHopSeq[j];
         _elrsHopSeq[j] = tmp;
     }
-
-    // Sync channel at position 0 — v2 §3.1.6
-    _elrsHopSeq[0] = _elrsDomain->syncChannel;
 }
 
 void elrsStart() {
@@ -357,6 +371,7 @@ void elrsStart() {
     _radio->setCurrentLimit(140.0);
 
     _elrsCurrentMHz = startFreq;
+    _elrsCurrentChannel = _elrsHopSeq[0];
     _elrsRunning = true;
     _elrsLastPktUs = micros();
 
@@ -418,6 +433,7 @@ void elrsStartBinding() {
     _radio->setCurrentLimit(140.0);
 
     _elrsCurrentMHz = syncFreq;
+    _elrsCurrentChannel = dom.syncChannel;
     _elrsRunning = true;
     _elrsState = ELRS_STATE_BINDING;
     _bindingStartMs = millis();
@@ -489,20 +505,23 @@ void elrsUpdate() {
     uint8_t numCh    = _elrsDomain->channels;
     uint8_t hopEvery = elrsEffectiveHopInterval();
 
-    // Hop every N packets (N from domain for standard, 2 for DVDA)
+    // Hop every N packets (N from domain for standard, 2 for DVDA).
+    // The shuffled sequence only contains non-sync channels; on every
+    // numCh-th hop we substitute the sync channel without advancing
+    // the sequence index.
     if (_elrsPktsSinceHop >= hopEvery) {
         _elrsPktsSinceHop = 0;
-        _elrsHopIdx = (_elrsHopIdx + 1) % numCh;
         _elrsHopCount++;
 
-        // Sync channel: every freq_count hops, force to sync channel
         uint8_t nextChan;
         if ((_elrsHopCount % numCh) == 0) {
             nextChan = _elrsDomain->syncChannel;
         } else {
+            _elrsHopIdx = (uint8_t)((_elrsHopIdx + 1) % _elrsSeqLen);
             nextChan = _elrsHopSeq[_elrsHopIdx];
         }
 
+        _elrsCurrentChannel = nextChan;
         float nextFreq = elrsChanFreq(*_elrsDomain, nextChan);
         _elrsCurrentMHz = nextFreq;
 
@@ -519,7 +538,7 @@ void elrsUpdate() {
 ElrsParams elrsGetParams() {
     return ElrsParams{
         _elrsCurrentMHz,
-        _elrsHopSeq[_elrsHopIdx],
+        _elrsCurrentChannel,
         _elrsDomain->channels,
         _elrsRate->sf,
         _elrsRate->rateHz,

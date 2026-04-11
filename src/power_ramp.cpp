@@ -12,7 +12,9 @@ static SX1262 *_radio = nullptr;
 static const ElrsDomain&  _rampDom  = ELRS_DOMAINS[ELRS_DOMAIN_FCC915];
 static const ElrsAirRate& _rampRate = ELRS_AIR_RATES[ELRS_RATE_200HZ];
 
+// Sequence holds non-sync channels only; sync is interleaved at runtime.
 static uint8_t _hopSeq[80];  // sized for largest domain
+static uint8_t _seqLen = 0;  // = numCh - 1 after build
 static uint8_t _hopIdx = 0;
 
 // Power ramp state
@@ -41,17 +43,23 @@ static uint32_t _rampDuration = 60;
 static const uint8_t RAMP_PAYLOAD[] = { 0xE1, 0x25, 0x00, 0x00, 0x05, 0x7A, 0x3C, 0xAA };
 
 static void buildHopSequence() {
-    uint8_t numCh = _rampDom.channels;
-    for (uint8_t i = 0; i < numCh; i++) _hopSeq[i] = i;
+    uint8_t numCh  = _rampDom.channels;
+    uint8_t syncCh = _rampDom.syncChannel;
+
+    uint8_t cnt = 0;
+    for (uint8_t i = 0; i < numCh; i++) {
+        if (i != syncCh) _hopSeq[cnt++] = i;
+    }
+    _seqLen = cnt;
+
     uint32_t rng = 0xCAFEBABE;
-    for (uint8_t i = numCh - 1; i > 0; i--) {
+    for (uint8_t i = cnt - 1; i > 0; i--) {
         rng = rng * ELRS_LCG_MULTIPLIER + ELRS_LCG_INCREMENT;
         uint8_t j = (rng >> 16) % (i + 1);
         uint8_t tmp = _hopSeq[i];
         _hopSeq[i] = _hopSeq[j];
         _hopSeq[j] = tmp;
     }
-    _hopSeq[0] = _rampDom.syncChannel;
 }
 
 void powerRampInit(SX1262 *radio) {
@@ -128,11 +136,15 @@ void powerRampUpdate() {
 
         if (_pktsSinceHop >= hopEvery) {
             _pktsSinceHop = 0;
-            _hopIdx = (_hopIdx + 1) % numCh;
             _hopCount++;
 
-            uint8_t nextChan = ((_hopCount % numCh) == 0)
-                ? _rampDom.syncChannel : _hopSeq[_hopIdx];
+            uint8_t nextChan;
+            if ((_hopCount % numCh) == 0) {
+                nextChan = _rampDom.syncChannel;
+            } else {
+                _hopIdx = (uint8_t)((_hopIdx + 1) % _seqLen);
+                nextChan = _hopSeq[_hopIdx];
+            }
             _currentMHz = elrsChanFreq(_rampDom, nextChan);
             _radio->setFrequency(_currentMHz);
         }

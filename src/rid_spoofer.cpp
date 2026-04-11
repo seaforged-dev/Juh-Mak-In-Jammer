@@ -79,15 +79,29 @@ static void buildBasicIdMsg(uint8_t *buf) {
 static void buildLocationMsg(uint8_t *buf) {
     memset(buf, 0, ODID_MSG_SIZE);
     buf[0] = ODID_MSG_TYPE_LOCATION | ODID_PROTO_VERSION;
-    // Byte 1: [status(4) | height_type(1) | ew_dir(1) | speed_mult(1) | reserved(1)]
-    // status=2 (Airborne), height_type=0 (above takeoff), ew_dir=0, speed_mult=0
-    buf[1] = 0x20;
-    // Byte 2: Direction (0-360 mapped to 0-255... but actually it's in 0-359 degrees)
-    buf[2] = (uint8_t)(_drone.heading / 360.0f * 255.0f);
-    // Byte 3: Speed (horizontal)
+
+    // Byte 1 status layout (ASTM F3411-22a §A.5.2, bit numbering per
+    // opendroneid-core-c): bits 7-4 = Status, bit 3 = reserved,
+    // bit 2 = HeightType, bit 1 = E/W Direction Segment,
+    // bit 0 = SpeedMultiplier.
+    //
+    // Status = 2 (Airborne). Direction field in byte 2 is 0-179 degrees
+    // and the E/W bit (bit 1) indicates whether to add 180 on decode.
+    float h = fmodf(_drone.heading, 360.0f);
+    if (h < 0) h += 360.0f;
+    bool ewBit = (h >= 180.0f);
+    if (ewBit) h -= 180.0f;
+    buf[1] = 0x20 | (ewBit ? 0x02 : 0x00);  // Airborne + optional EW segment
+    buf[2] = (uint8_t)h;                    // 0-179 degrees
+
+    // Byte 3: horizontal speed (encodeSpeed handles 0.25 / 0.75 mult branch)
     buf[3] = encodeSpeed(_drone.speed);
-    // Byte 4: Vertical speed (in 0.5 m/s, signed, offset by 63)
-    buf[4] = (uint8_t)((int8_t)(_drone.vspeed * 2.0f) + 63);
+
+    // Byte 4: vertical speed — signed int8 in 0.5 m/s increments, NO offset.
+    // Range is ±63.5 m/s. Previous code added a bogus +63 offset.
+    int8_t vs = (int8_t)constrain((int)(_drone.vspeed * 2.0f), -127, 127);
+    buf[4] = (uint8_t)vs;
+
     // Bytes 5-8: Latitude (int32 LE, degrees * 1e7)
     int32_t lat = encodeLatLon(_drone.latitude);
     memcpy(&buf[5], &lat, 4);
@@ -104,11 +118,20 @@ static void buildLocationMsg(uint8_t *buf) {
     uint16_t height = encodeAlt(_drone.height);
     memcpy(&buf[17], &height, 2);
     // Bytes 19-20: Horizontal/Vertical accuracy (0 = unknown)
-    // Bytes 21-22: Baro alt accuracy, timestamp
-    // Byte 23: Timestamp adjustment (0.1s units since last full hour)
-    uint32_t secSinceBoot = millis() / 1000;
-    uint16_t secSinceHour = (uint16_t)(secSinceBoot % 3600);
-    buf[23] = (uint8_t)((secSinceHour % 60) * 10);  // 0.1s within minute
+    // Byte 21: Baro alt accuracy (0 = unknown)
+
+    // Bytes 22-23: Timestamp — uint16 LE, tenths of a second since the last
+    // full UTC hour (0-35999). JJ has no RTC/GPS so this is derived from
+    // millis() as a rolling "tenths since boot-hour"; a fully-spec-correct
+    // emitter would use real wall-clock UTC. Previous code only wrote
+    // byte 23 as (seconds-within-minute * 10), which is structurally wrong.
+    uint32_t nowMs = millis();
+    uint32_t secSinceBoot = nowMs / 1000;
+    uint16_t tenthsSinceHour = (uint16_t)((secSinceBoot % 3600) * 10
+                                         + (nowMs % 1000) / 100);
+    if (tenthsSinceHour > 35999) tenthsSinceHour = 35999;
+    buf[22] = (uint8_t)(tenthsSinceHour & 0xFF);
+    buf[23] = (uint8_t)((tenthsSinceHour >> 8) & 0xFF);
 }
 
 static void buildSystemMsg(uint8_t *buf) {
